@@ -1,7 +1,16 @@
 <!doctype html>
-<html>Load tract file (mrtrix .tck format): <input type="file" onchange="parseTck(event)"/><br/>
+<html>
+<style>
+body,div,table,canvas {
+    box-sizing: border-box;
+    margin: 0px;
+    border: 0px;
+    padding: 0px;
+}
+</style>
+<body style="width:100%; height:100vh; overflow:hidden">Load tract file (mrtrix .tck format): <input type="file" onchange="parseTck(event)"/><br/>
 Check console (F12) for file header.
-<div id="plotlyGraphDiv" style="width:100%; height:100%"></div>
+<div id="plotlyGraphDiv" style="position: relative; width:100%; height:90%; top:10%"></div>
 
 <script type="module">
 
@@ -29,7 +38,10 @@ async function parseTck(evt) {
     // initialize plotly data
     const plotlyData = [];
     const plotlyLayout = { }
-    const plotlyConfig = {}
+    const plotlyConfig = {
+      displayModeBar: false,
+      responsive: true
+    }
     const x = [];
     const y = [];
     const z = [];
@@ -52,4 +64,4 @@ async function parseTck(evt) {
 }
 window.parseTck = parseTck;
 </script>
-</html>
+</body></html>

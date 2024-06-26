@@ -68,7 +68,12 @@ export function parseTck(fileAsArrayBuffer,header) {
     let data;
     let dataLength = (fileAsArrayBuffer.byteLength-byteOffset)/bytesPerElement;
     if (littleEndian === systemByteOrderLittleEndian()) {
-        data = new dtype(fileAsArrayBuffer,byteOffset);
+        if (byteOffset % bytesPerElement) {
+            const dataBuffer = fileAsArrayBuffer.slice(byteOffset);
+            data = new dtype(dataBuffer,0);
+        } else {
+            data = new dtype(fileAsArrayBuffer,byteOffset);
+        }
     } else {
         data = new dtype(dataLength);
         const dataView = new DataView(fileAsArrayBuffer,byteOffset);
