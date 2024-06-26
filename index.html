@@ -1,0 +1,55 @@
+<!doctype html>
+<html>Load tract file (mrtrix .tck format): <input type="file" onchange="parseTck(event)"/><br/>
+Check console (F12) for file header.
+<div id="plotlyGraphDiv" style="width:100%; height:100%"></div>
+
+<script type="module">
+
+function readFileAsArrayBuffer(file){
+  return new Promise((resolve, reject) => {
+    var fr = new FileReader();  
+    fr.onload = () => {
+      resolve(fr.result )
+    };
+    fr.onerror = reject;
+    fr.readAsArrayBuffer(file);
+  });
+}
+
+async function parseTck(evt) {
+    const contents = await readFileAsArrayBuffer(evt.target.files[0]);
+    
+    const tckparser = await import('./tckparser.js');
+    const [header,tracts] = tckparser.parseTck(contents);
+    console.log(header)
+    //console.log(tracts)
+    
+    const plotlyModule = await import("./jsm/plotly-2.32.0.min.js");
+
+    // initialize plotly data
+    const plotlyData = [];
+    const plotlyLayout = { }
+    const plotlyConfig = {}
+    const x = [];
+    const y = [];
+    const z = [];
+    const numTracts = (tracts.length>1000 ? 1000 : tracts.length);
+    for (let i=0; i<numTracts; i++) {
+        const tr = tracts[i];
+        for (let j=0; j<tr.length/3; j++) {
+            x.push(tr[3*j]);
+            y.push(tr[3*j+1]);
+            z.push(tr[3*j+2]);
+        }
+        x.push(NaN);
+        y.push(NaN);
+        z.push(NaN);
+    }
+    plotlyData.push({ x,y,z, type:"scatter3d",mode:"lines", marker: { symbol: 'circle-closed-dot',size:3,line: { 'width':1 } } });
+    const graphDiv = document.getElementById('plotlyGraphDiv')
+    Plotly.newPlot(graphDiv, plotlyData, plotlyLayout, plotlyConfig);
+    console.log(plotlyData);
+}
+window.parseTck = parseTck;
+</script>
+</html>
