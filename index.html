@@ -8,11 +8,36 @@ body,div,table,canvas {
     padding: 0px;
 }
 </style>
-<body style="width:100%; height:100vh; overflow:hidden">Load tract file (mrtrix .tck format): <input type="file" onchange="parseTck(event)"/><br/>
-Check console (F12) for file header.
-<div id="plotlyGraphDiv" style="position: relative; width:100%; height:90%; top:10%"></div>
+<body style="width:100%; height:100vh; overflow-y:scroll"><div id="controls" style="position:absolute; padding: 1ex; z-index:10">
+Use webgl library: <select id="webglLibrary"><option selected>Plotly.js</option><option>Three.js</option></select><br/>
+Limit tracts per bundle: <input id="maxTracts" type="string" value="100"><br/>
+Load one or more tract files (mrtrix .tck format): <input type="file" onchange="renderScene(event)" multiple/><br/>
+Load <b>all</b> .tck tract files from a <b>folder</b>, recursively: <input type="file" onchange="renderScene(event)" directory webkitdirectory multiple/><br/>
+Check console (F12) for file header(s).
+</div><div id="webglContainer" style="position: relative; width:100%; height:100vh"></div>
 
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"
+    }
+  }
+</script>
 <script type="module">
+
+let plotlyModule = undefined;
+
+function ThreeJS(module,camera,controls,scene) {
+    this.module = module;
+    this.camera = camera;
+    this.controls = controls;
+    this.scene = scene;
+    this.colorCycle = [0x1f77b4, 0xff7f0e, 0x2ca02c, 0xd62728, 0x9467bd, 0x8c564b, 0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf];
+    this.nextColorIndex = 0;
+}
+let threeInstance = undefined;
+
 
 function readFileAsArrayBuffer(file){
   return new Promise((resolve, reject) => {
@@ -25,43 +50,156 @@ function readFileAsArrayBuffer(file){
   });
 }
 
-async function parseTck(evt) {
-    const contents = await readFileAsArrayBuffer(evt.target.files[0]);
-    
-    const tckparser = await import('./tckparser.js');
-    const [header,tracts] = tckparser.parseTck(contents);
-    console.log(header)
-    //console.log(tracts)
-    
-    const plotlyModule = await import("./jsm/plotly-2.32.0.min.js");
+function getMaxTracts() {
+    const elem = document.getElementById('maxTracts')
+    let maxTracts = parseInt(elem.value)
+    if (!maxTracts) maxTracts = 100
+    elem.value = maxTracts 
+    return maxTracts;
+}
 
-    // initialize plotly data
-    const plotlyData = [];
-    const plotlyLayout = { }
+async function renderTck(file, tckParser) {
+    const contents = await readFileAsArrayBuffer(file);
+    console.log('Showing file ',file)
+    
+    const [header,tracts] = tckParser.parseTck(contents);
+    console.log(header)
+    
+    const elem = document.getElementById('webglLibrary')
+    const webglLibrary = elem.options[elem.selectedIndex].value
+
+    if (webglLibrary == 'Plotly.js') {
+        if (plotlyModule === undefined) plotlyModule = await plotlyInit();
+        // initialize plotly data
+        const plotlyData = [];
+        const plotlyLayout = { }
+        const plotlyConfig = {
+          displayModeBar: false,
+          responsive: true
+        }
+        const x = [];
+        const y = [];
+        const z = [];
+        const maxTracts = getMaxTracts();
+        const numTracts = (tracts.length>maxTracts ? maxTracts : tracts.length);
+        for (let i=0; i<numTracts; i++) {
+            const tr = tracts[i];
+            for (let j=0; j<tr.length/3; j++) {
+                x.push(tr[3*j]);
+                y.push(tr[3*j+1]);
+                z.push(tr[3*j+2]);
+            }
+            x.push(NaN);
+            y.push(NaN);
+            z.push(NaN);
+        }
+        plotlyData.push({ x,y,z, name:file.name, type:"scatter3d",mode:"lines", marker: { symbol: 'circle-closed-dot',size:3,line: { 'width':1 } } });
+        const graphDiv = document.getElementById('webglContainer')
+        Plotly.addTraces(graphDiv, plotlyData);
+    } else {
+        if (threeInstance === undefined) threeInstance = new ThreeJS(...(await threeInit('webglContainer')));
+        threeInstance.addTracts(header,tracts,threeInstance.nextPlotColor());
+        threeInstance.centerView();
+    }
+}
+
+function resetCanvas() {
+    plotlyModule = undefined
+    threeInstance = undefined
+    const graphDiv = document.getElementById('webglContainer')
+    graphDiv.innerHTML = '';
+}
+
+async function plotlyInit(parentId) {
+    const plotlyModule = await import('./jsm/plotly-2.32.0.min.js');
     const plotlyConfig = {
       displayModeBar: false,
       responsive: true
     }
-    const x = [];
-    const y = [];
-    const z = [];
-    const numTracts = (tracts.length>1000 ? 1000 : tracts.length);
+    const graphDiv = document.getElementById('webglContainer')
+    Plotly.newPlot(graphDiv, [], {}, plotlyConfig);
+    return plotlyModule;
+}
+
+
+async function threeInit(parentId) {
+    const threeModule = await import('three');
+    let OrbitControls = await import('three/addons/controls/OrbitControls.js');
+    OrbitControls = OrbitControls.OrbitControls;
+
+    const renderer = new threeModule.WebGLRenderer();
+    const containerElem = document.getElementById(parentId);
+    containerElem.appendChild( renderer.domElement );    
+    renderer.domElement.style = "position: relative; width:100%; height:100%";
+    renderer.setSize( containerElem.clientWidth, containerElem.clientHeight );
+
+    const camera = new threeModule.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 500 );
+    const controls = new OrbitControls( camera, renderer.domElement );
+    camera.position.set( 0, 0, 100 );
+    camera.lookAt( 0, 0, 0 );
+
+    const scene = new threeModule.Scene();
+    scene.background = new threeModule.Color( 0xffffff );
+    //scene.fog = new threeModule.FogExp2( 0xcccccc, 0.004 );
+    
+    function animate() {
+        // any other animations
+        requestAnimationFrame(animate)
+        //controls.update()
+        renderer.render( scene, camera );
+    }
+    animate();
+
+    return [threeModule,camera,controls,scene];
+}
+
+ThreeJS.prototype.centerView = function() {
+    // get the tracts into view of the camera
+    let bBox = new this.module.Box3().setFromObject(this.scene);
+    const sphere = new this.module.Sphere();
+    bBox.getBoundingSphere(sphere);
+    const dist = sphere.radius / (2 * Math.tan(this.camera.fov * Math.PI / 360));
+    this.camera.position.set(sphere.center.x, sphere.center.y, dist * 2.0); // fudge factor so you can see the boundaries
+    this.camera.lookAt(sphere.center);
+    this.controls.target = sphere.center;
+}
+
+ThreeJS.prototype.nextPlotColor = function() {
+    const color = this.colorCycle[this.nextColorIndex];
+    this.nextColorIndex = (this.nextColorIndex+1) % this.colorCycle.length;
+    return color;
+}
+
+ThreeJS.prototype.addTracts = async function(header,tracts,hexColor) {
+    if (hexColor === undefined) hexColor = 0x0000ff;
+
+    //create a LineBasicMaterial
+    const material = new this.module.LineBasicMaterial( { color: hexColor } );    
+
+    const maxTracts = getMaxTracts();
+    const numTracts = (tracts.length>maxTracts ? maxTracts : tracts.length);
     for (let i=0; i<numTracts; i++) {
         const tr = tracts[i];
-        for (let j=0; j<tr.length/3; j++) {
-            x.push(tr[3*j]);
-            y.push(tr[3*j+1]);
-            z.push(tr[3*j+2]);
-        }
-        x.push(NaN);
-        y.push(NaN);
-        z.push(NaN);
+        const geometry = new this.module.BufferGeometry();
+        geometry.setAttribute( 'position', new this.module.BufferAttribute( tr, 3 ) );
+        const line = new this.module.Line( geometry, material );
+        this.scene.add( line );
     }
-    plotlyData.push({ x,y,z, type:"scatter3d",mode:"lines", marker: { symbol: 'circle-closed-dot',size:3,line: { 'width':1 } } });
-    const graphDiv = document.getElementById('plotlyGraphDiv')
-    Plotly.newPlot(graphDiv, plotlyData, plotlyLayout, plotlyConfig);
-    console.log(plotlyData);
 }
-window.parseTck = parseTck;
+
+async function renderScene(evt) {
+    const tckfiles = []
+    for (let file of evt.target.files) {
+        if (file.name.toLowerCase().endsWith('.tck')) tckfiles.push(file);
+    }
+    if (tckfiles.length<1) throw('No .tck files among '+evt.target.files.length+' selected files.');
+    const tckParser = await import('./tckparser.js');
+    
+    resetCanvas();
+    for (let file of tckfiles) {
+        renderTck(file, tckParser)
+    }    
+}
+window.renderScene = renderScene;
 </script>
 </body></html>
