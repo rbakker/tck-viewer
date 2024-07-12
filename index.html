@@ -65,11 +65,8 @@ async function renderTck(file, tckParser) {
     const [header,tracts] = tckParser.parseTck(contents);
     console.log(header)
     
-    const elem = document.getElementById('webglLibrary')
-    const webglLibrary = elem.options[elem.selectedIndex].value
-
-    if (webglLibrary == 'Plotly.js') {
-        if (plotlyModule === undefined) plotlyModule = await plotlyInit();
+    if (plotlyModule) {
+        //if (plotlyModule === undefined) plotlyModule = await plotlyInit();
         // initialize plotly data
         const plotlyData = [];
         const plotlyLayout = { }
@@ -97,17 +94,21 @@ async function renderTck(file, tckParser) {
         const graphDiv = document.getElementById('webglContainer')
         Plotly.addTraces(graphDiv, plotlyData);
     } else {
-        if (threeInstance === undefined) threeInstance = new ThreeJS(...(await threeInit('webglContainer')));
+        //if (threeInstance === undefined) threeInstance = new ThreeJS(...(await threeInit('webglContainer')));
         threeInstance.addTracts(header,tracts,threeInstance.nextPlotColor());
         threeInstance.centerView();
     }
 }
 
-function resetCanvas() {
+async function initGraphics() {
     plotlyModule = undefined
     threeInstance = undefined
     const graphDiv = document.getElementById('webglContainer')
     graphDiv.innerHTML = '';
+    const elem = document.getElementById('webglLibrary')
+    const webglLibrary = elem.options[elem.selectedIndex].value
+    if (webglLibrary == 'Plotly.js') plotlyModule = await plotlyInit();
+    else threeInstance = new ThreeJS(...(await threeInit('webglContainer')));
 }
 
 async function plotlyInit(parentId) {
@@ -195,7 +196,7 @@ async function renderScene(evt) {
     if (tckfiles.length<1) throw('No .tck files among '+evt.target.files.length+' selected files.');
     const tckParser = await import('./tckparser.js');
     
-    resetCanvas();
+    await initGraphics();
     for (let file of tckfiles) {
         renderTck(file, tckParser)
     }    
