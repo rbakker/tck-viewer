@@ -35,17 +35,11 @@ Check console (F12) for file header(s).
 <script type="module">
 
 let plotlyModule = undefined;
+let plotlyInstance = undefined;
 
-function ThreeJS(module,camera,controls,scene) {
-    this.module = module;
-    this.camera = camera;
-    this.controls = controls;
-    this.scene = scene;
-    this.colorCycle = [0x1f77b4, 0xff7f0e, 0x2ca02c, 0xd62728, 0x9467bd, 0x8c564b, 0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf];
-    this.nextColorIndex = 0;
-}
+let threeModule = undefined;
+let threeAddOns = undefined;
 let threeInstance = undefined;
-
 
 function readFileAsArrayBuffer(file){
   return new Promise((resolve, reject) => {
@@ -71,8 +65,161 @@ async function renderTck(tckPromise, tckParser) {
     const [header,tracts] = tckParser.parseTck(contents);
     console.log(header)
     
-    if (plotlyModule) {
-        //if (plotlyModule === undefined) plotlyModule = await plotlyInit();
+    if (threeInstance) {
+        threeInstance.addTracts(header,tracts,threeInstance.nextPlotColor());
+        threeInstance.centerView();
+    } else {
+        plotlyInstance.addTracts(tckName,header,tracts)
+    }
+}
+
+async function initGraphics() {
+    // cleanup previous mess
+    if (threeInstance) {
+        threeInstance.clear()
+        threeInstance = undefined
+    }
+    if (plotlyInstance) {
+        plotlyInstance.clear()
+        plotlyInstance = undefined
+    }
+    const containerElem = document.getElementById('webglContainer');
+    containerElem.innerHTML = '';
+    // select engine
+    const elem = document.getElementById('webglLibrary');
+    const webglLibrary = elem.options[elem.selectedIndex].value;
+    if (webglLibrary == 'Plotly.js') {
+        if (plotlyModule === undefined) {
+            plotlyModule = await import('./jsm/plotly-2.32.0.min.js');
+        }
+        plotlyInstance = new PlotlyJS(containerElem);
+    } else {
+        if (threeModule === undefined || threeAddOns === undefined) {
+            const [module,OrbitControls,Line2,LineMaterial,LineGeometry] = await Promise.all([
+               import('three'),
+               import('three/addons/controls/OrbitControls.js'),
+               import('three/addons/lines/Line2.js'),
+               import('three/addons/lines/LineMaterial.js'),
+               import('three/addons/lines/LineGeometry.js')
+            ])
+            threeModule = module;
+            threeAddOns = { 
+                'OrbitControls': OrbitControls.OrbitControls,
+                'Line2': Line2.Line2,
+                'LineMaterial': LineMaterial.LineMaterial,
+                'LineGeometry': LineGeometry.LineGeometry
+            }
+        }
+        threeInstance = new ThreeJS(containerElem);
+    }
+}
+
+function ThreeJS(containerElem) {
+    this.init(containerElem);
+    this.colorCycle = [0x1f77b4, 0xff7f0e, 0x2ca02c, 0xd62728, 0x9467bd, 0x8c564b, 0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf];
+    this.nextColorIndex = 0;
+}
+
+ThreeJS.prototype = {
+    init: function(containerElem) {
+        this.renderer = new threeModule.WebGLRenderer({ antialias: true });
+        containerElem.appendChild( this.renderer.domElement );    
+        this.renderer.domElement.style = "position: relative; width:100%; height:100%";
+        this.renderer.setSize( containerElem.clientWidth, containerElem.clientHeight );
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+
+        this.camera = new threeModule.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 500 );
+        this.controls = new threeAddOns.OrbitControls( this.camera, this.renderer.domElement );
+        this.camera.position.set( 0, 0, 100 );
+        this.camera.lookAt( 0, 0, 0 );
+
+        this.scene = new threeModule.Scene();
+        this.scene.background = new threeModule.Color( 0xffffff );
+        //this.scene.fog = new threeModule.FogExp2( 0xcccccc, 0.004 );
+        
+        this.stopAnimation = false;
+        const animate = () => {
+            if (this.stopAnimation) {
+                console.log('animation stopped')
+                return;
+            }
+            // any other animations
+            requestAnimationFrame(animate)
+            //controls.update()
+            this.renderer.render( this.scene, this.camera );
+        }
+        animate();
+    },
+    clear: function() {
+        this.stopAnimation = true;
+        if (this.renderer) this.renderer.clear();
+    },
+    centerView: function() {
+        // Inspiration: https://stackoverflow.com/questions/14614252/how-to-fit-camera-to-object
+        // get the tracts into view of the camera
+        let bBox = new threeModule.Box3().setFromObject(this.scene);
+        const sphere = new threeModule.Sphere();
+        bBox.getBoundingSphere(sphere);
+        const dist = sphere.radius / (2 * Math.tan(this.camera.fov * Math.PI / 360));
+        this.camera.position.set(sphere.center.x, sphere.center.y, dist * 2.0); // fudge factor so you can see the boundaries
+        this.camera.lookAt(sphere.center);
+        this.controls.target = sphere.center;
+    },
+    nextPlotColor: function() {
+        const color = this.colorCycle[this.nextColorIndex];
+        this.nextColorIndex = (this.nextColorIndex+1) % this.colorCycle.length;
+        return color;
+    },
+    addTracts: async function(header,tracts,hexColor) {
+        // addons.Line2 supports linewidth and gives prettier results.
+        // module.Line does not support linewidth but may offer better performance.
+        const useLine2 = true;
+        if (hexColor === undefined) hexColor = 0x0000ff;
+
+        //create a LineBasicMaterial
+        let material;
+        if (useLine2) {
+            material = new threeAddOns.LineMaterial( { color: hexColor, linewidth: 1.2 } );
+        } else {
+            material = new threeModule.LineBasicMaterial( { color: hexColor } );
+        }
+        
+        const maxTracts = getMaxTracts();
+        const numTracts = (tracts.length>maxTracts ? maxTracts : tracts.length);
+        for (let i=0; i<numTracts; i++) {
+            const tr = tracts[i];
+            let line;
+            if (useLine2) {
+                const geometry = new threeAddOns.LineGeometry();
+                geometry.setPositions( tr );
+                line = new threeAddOns.Line2( geometry, material );
+            } else {
+                const geometry = new threeModule.BufferGeometry();
+                geometry.setAttribute( 'position', new threeModule.BufferAttribute( tr, 3 ) );
+                line = new threeModule.Line( geometry, material);
+            }
+            this.scene.add( line );
+        }
+    }
+}
+
+function PlotlyJS(containerElem) {
+    this.init(containerElem);
+}
+
+PlotlyJS.prototype = {
+    init: function(containerElem) {
+        this.containerElem = containerElem;
+        const plotlyConfig = {
+            displayModeBar: false,
+            responsive: true
+        }
+        Plotly.newPlot(containerElem, [], {}, plotlyConfig);
+    },
+    clear: function() {
+        Plotly.purge(this.containerElem);
+    },
+    addTracts: function(name,header,tracts) {
         // initialize plotly data
         const plotlyData = [];
         const plotlyLayout = { }
@@ -96,104 +243,8 @@ async function renderTck(tckPromise, tckParser) {
             y.push(NaN);
             z.push(NaN);
         }
-        plotlyData.push({ x,y,z, name:tckName, type:"scatter3d",mode:"lines", marker: { symbol: 'circle-closed-dot',size:3,line: { 'width':1 } } });
-        const graphDiv = document.getElementById('webglContainer')
-        Plotly.addTraces(graphDiv, plotlyData);
-    } else {
-        //if (threeInstance === undefined) threeInstance = new ThreeJS(...(await threeInit('webglContainer')));
-        threeInstance.addTracts(header,tracts,threeInstance.nextPlotColor());
-        threeInstance.centerView();
-    }
-}
-
-async function initGraphics() {
-    plotlyModule = undefined
-    threeInstance = undefined
-    const graphDiv = document.getElementById('webglContainer')
-    graphDiv.innerHTML = '';
-    const elem = document.getElementById('webglLibrary')
-    const webglLibrary = elem.options[elem.selectedIndex].value
-    if (webglLibrary == 'Plotly.js') plotlyModule = await plotlyInit();
-    else threeInstance = new ThreeJS(...(await threeInit('webglContainer')));
-}
-
-async function plotlyInit(parentId) {
-    const plotlyModule = await import('./jsm/plotly-2.32.0.min.js');
-    const plotlyConfig = {
-      displayModeBar: false,
-      responsive: true
-    }
-    const graphDiv = document.getElementById('webglContainer')
-    Plotly.newPlot(graphDiv, [], {}, plotlyConfig);
-    return plotlyModule;
-}
-
-
-async function threeInit(parentId) {
-    const threeModule = await import('three');
-    let OrbitControls = await import('three/addons/controls/OrbitControls.js');
-    OrbitControls = OrbitControls.OrbitControls;
-
-    const renderer = new threeModule.WebGLRenderer({ antialias: true });
-    const containerElem = document.getElementById(parentId);
-    containerElem.appendChild( renderer.domElement );    
-    renderer.domElement.style = "position: relative; width:100%; height:100%";
-    renderer.setSize( containerElem.clientWidth, containerElem.clientHeight );
-    renderer.setPixelRatio(window.devicePixelRatio);
-
-    const camera = new threeModule.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 500 );
-    const controls = new OrbitControls( camera, renderer.domElement );
-    camera.position.set( 0, 0, 100 );
-    camera.lookAt( 0, 0, 0 );
-
-    const scene = new threeModule.Scene();
-    scene.background = new threeModule.Color( 0xffffff );
-    //scene.fog = new threeModule.FogExp2( 0xcccccc, 0.004 );
-    
-    function animate() {
-        // any other animations
-        requestAnimationFrame(animate)
-        //controls.update()
-        renderer.render( scene, camera );
-    }
-    animate();
-
-    return [threeModule,camera,controls,scene];
-}
-
-ThreeJS.prototype.centerView = function() {
-    // Inspiration: https://stackoverflow.com/questions/14614252/how-to-fit-camera-to-object
-    // get the tracts into view of the camera
-    let bBox = new this.module.Box3().setFromObject(this.scene);
-    const sphere = new this.module.Sphere();
-    bBox.getBoundingSphere(sphere);
-    const dist = sphere.radius / (2 * Math.tan(this.camera.fov * Math.PI / 360));
-    this.camera.position.set(sphere.center.x, sphere.center.y, dist * 2.0); // fudge factor so you can see the boundaries
-    this.camera.lookAt(sphere.center);
-    this.controls.target = sphere.center;
-}
-
-ThreeJS.prototype.nextPlotColor = function() {
-    const color = this.colorCycle[this.nextColorIndex];
-    this.nextColorIndex = (this.nextColorIndex+1) % this.colorCycle.length;
-    return color;
-}
-
-ThreeJS.prototype.addTracts = async function(header,tracts,hexColor) {
-    if (hexColor === undefined) hexColor = 0x0000ff;
-
-    //create a LineBasicMaterial
-    const material = new this.module.LineBasicMaterial( { color: hexColor, linewidth: 1 } );    
-    const material1 = new this.module.LineBasicMaterial( { color: hexColor, linewidth: 3 } );    
-
-    const maxTracts = getMaxTracts();
-    const numTracts = (tracts.length>maxTracts ? maxTracts : tracts.length);
-    for (let i=0; i<numTracts; i++) {
-        const tr = tracts[i];
-        const geometry = new this.module.BufferGeometry();
-        geometry.setAttribute( 'position', new this.module.BufferAttribute( tr, 3 ) );
-        const line = new this.module.Line( geometry, i%2 ? material : material1);
-        this.scene.add( line );
+        plotlyData.push({ x,y,z, name:name, type:"scatter3d",mode:"lines", marker: { symbol: 'circle-closed-dot',size:3,line: { 'width':1 } } });
+        Plotly.addTraces(this.containerElem, plotlyData);
     }
 }
 
@@ -212,7 +263,9 @@ async function renderScene(evt) {
     }
     
     const tckParser = await import('./tckparser.js');
+    console.log('INIT GRAPHICS')
     await initGraphics();
+    console.log('INIT GRAPHICS DONE')
     for (let tckPr of tckPromises) {
         renderTck(tckPr, tckParser)
     }
