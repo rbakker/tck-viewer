@@ -73,6 +73,15 @@ async function renderTck(tckPromise, tckParser) {
     }
 }
 
+async function renderMesh(meshPromise) {
+    if (threeInstance) {
+        const [contents,meshName] = await meshPromise;
+        threeInstance.addMesh(contents,meshName)
+    } else {
+        console.log('Mesh file rendering not supported by Plotly.js.')
+    }
+}
+
 async function initGraphics() {
     // cleanup previous mess
     if (threeInstance) {
@@ -200,6 +209,27 @@ ThreeJS.prototype = {
             }
             this.scene.add( line );
         }
+    },
+    addMesh: async function(contents,meshName) {
+        let VTKLoader = await import('three/addons/loaders/VTKLoader.js')
+        VTKLoader = VTKLoader.VTKLoader;
+
+        const loader = new VTKLoader();
+        const geometry = loader.parse(contents);
+        //geometry.center();
+        geometry.computeVertexNormals();
+
+        const hemiLight = new threeModule.HemisphereLight( 0xffffff, 0x000000, 3 );
+        this.scene.add( hemiLight );
+
+        //const material = new threeModule.MeshLambertMaterial( { color: 0xffffff } );
+        const material = new threeModule.MeshPhysicalMaterial({
+            roughness: 0,
+            transmission: 1,  
+            thickness: 1,
+        })
+        const mesh = new threeModule.Mesh( geometry, material );
+        this.scene.add( mesh );
     }
 }
 
@@ -250,6 +280,7 @@ PlotlyJS.prototype = {
 
 async function renderScene(evt) {
     const tckPromises = []
+    const meshPromises = []
     
     if (evt.target.value == 'example.tck') {
         tckPromises.push( fetch('./data/example.tck').then( async (response) => [await response.arrayBuffer(),'example.tck'] ) );
@@ -258,16 +289,21 @@ async function renderScene(evt) {
           if (file.name.toLowerCase().endsWith('.tck')) {
               tckPromises.push(readFileAsArrayBuffer(file));
           }
+          if (file.name.toLowerCase().endsWith('.vtk')) {
+              meshPromises.push(readFileAsArrayBuffer(file));
+          }
       }
       if (tckPromises.length<1) throw('No .tck files among '+evt.target.files.length+' selected files.');
     }
     
     const tckParser = await import('./tckparser.js');
-    console.log('INIT GRAPHICS')
     await initGraphics();
-    console.log('INIT GRAPHICS DONE')
     for (let tckPr of tckPromises) {
         renderTck(tckPr, tckParser)
+    }
+    
+    for (let meshPr of meshPromises) {
+        renderMesh(meshPr)
     }
 }
 window.renderScene = renderScene;
