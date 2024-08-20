@@ -183,7 +183,8 @@ ThreeJS.prototype.addTracts = async function(header,tracts,hexColor) {
     if (hexColor === undefined) hexColor = 0x0000ff;
 
     //create a LineBasicMaterial
-    const material = new this.module.LineBasicMaterial( { color: hexColor } );    
+    const material = new this.module.LineBasicMaterial( { color: hexColor, linewidth: 1 } );    
+    const material1 = new this.module.LineBasicMaterial( { color: hexColor, linewidth: 3 } );    
 
     const maxTracts = getMaxTracts();
     const numTracts = (tracts.length>maxTracts ? maxTracts : tracts.length);
@@ -191,7 +192,7 @@ ThreeJS.prototype.addTracts = async function(header,tracts,hexColor) {
         const tr = tracts[i];
         const geometry = new this.module.BufferGeometry();
         geometry.setAttribute( 'position', new this.module.BufferAttribute( tr, 3 ) );
-        const line = new this.module.Line( geometry, material );
+        const line = new this.module.Line( geometry, i%2 ? material : material1);
         this.scene.add( line );
     }
 }
