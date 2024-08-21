@@ -13,8 +13,8 @@ ul {
 </style>
 <body style="width:100%; height:100vh; overflow-y:scroll"><div id="controls" style="position:absolute; padding: 1ex; z-index:10">
 Render options<ul>
-<li>webgl library: <select id="webglLibrary"><option selected>Plotly.js</option><option>Three.js</option></select></li>
-<li>limit tracts per bundle: <input id="maxTracts" type="string" value="100"></li>
+<li>webgl library: <select id="webglLibrary"><option>Plotly.js</option><option selected>Three.js</option></select></li>
+<li>limit tracts per bundle: <input id="maxTracts" type="string" value="500"></li>
 </ul>
 Load tract<ul>
 <li>from this computer, select one or more .tck files: <input type="file" onchange="renderScene(event)" multiple/></li> 
@@ -23,6 +23,40 @@ Load tract<ul>
 </ul>
 Check console (F12) for file header(s).
 </div><div id="webglContainer" style="position: relative; width:100%; height:100vh"></div>
+
+<script type="x-shader/x-vertex" id="glass_vertexShader">
+  // glass shader (copied from SBA)
+  // makes vertices with normals parallel to view direction transparent.
+  attribute vec3 color;
+  varying float cosAlpha;
+  uniform vec3 diffuseColor;
+  
+  void main() {
+    vec4 pos_in_camera = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * pos_in_camera;
+    vec3 normalDirection = normalize(mat3(modelViewMatrix) * normal);
+    vec3 viewDirection = normalize(pos_in_camera.xyz);
+    cosAlpha = dot(viewDirection, normalDirection);
+  }
+</script>
+
+<script type="x-shader/x-fragment" id="glass_fragmentShader">
+  uniform vec3 diffuseColor;
+  uniform float transparency;
+  uniform float edgeEffect;
+  varying float cosAlpha;
+  void main() {
+    float s = 2.0*edgeEffect;
+    float meanOpacity = pow(1.0-transparency,1.5);
+    float maxOpacity = pow(1.0-transparency,0.5); 
+    float a = meanOpacity*(s+1.0);
+    float resistance = 1.0-abs(cosAlpha);
+    float opacity = clamp( a*pow(resistance,s), 0.0, maxOpacity );
+    if (cosAlpha>0.0) opacity *= 0.5;
+    vec3 color = diffuseColor*pow(resistance,0.25*s);
+    gl_FragColor = vec4( color, opacity );
+  }
+</script>
 
 <script type="importmap">
   {
@@ -216,18 +250,23 @@ ThreeJS.prototype = {
 
         const loader = new VTKLoader();
         const geometry = loader.parse(contents);
-        //geometry.center();
         geometry.computeVertexNormals();
 
-        const hemiLight = new threeModule.HemisphereLight( 0xffffff, 0x000000, 3 );
-        this.scene.add( hemiLight );
+        //const hemiLight = new threeModule.HemisphereLight( 0xffffff, 0x000000, 3 );
+        //this.scene.add( hemiLight );
 
-        //const material = new threeModule.MeshLambertMaterial( { color: 0xffffff } );
-        const material = new threeModule.MeshPhysicalMaterial({
-            roughness: 0,
-            transmission: 1,  
-            thickness: 1,
-        })
+  			const material = new threeModule.ShaderMaterial( {
+						uniforms: { 
+              'diffuseColor': { value: new threeModule.Color(0x777777) },
+              'transparency': { value: 0.3 },
+              'edgeEffect': { value: 1 },
+            },
+						vertexShader: document.getElementById( 'glass_vertexShader' ).textContent,
+						fragmentShader: document.getElementById( 'glass_fragmentShader' ).textContent,
+						side: threeModule.DoubleSide,
+						alphaToCoverage: true // only works when WebGLRenderer's "antialias" is set to "true"
+        } );
+
         const mesh = new threeModule.Mesh( geometry, material );
         this.scene.add( mesh );
     }
