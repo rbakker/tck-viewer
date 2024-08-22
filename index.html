@@ -111,6 +111,7 @@ async function renderMesh(meshPromise) {
     if (threeInstance) {
         const [contents,meshName] = await meshPromise;
         threeInstance.addMesh(contents,meshName)
+        threeInstance.centerView();
     } else {
         console.log('Mesh file rendering not supported by Plotly.js.')
     }
@@ -138,16 +139,18 @@ async function initGraphics() {
         plotlyInstance = new PlotlyJS(containerElem);
     } else {
         if (threeModule === undefined || threeAddOns === undefined) {
-            const [module,OrbitControls,Line2,LineMaterial,LineGeometry] = await Promise.all([
+            const [module,TrackballControls,Line2,LineMaterial,LineGeometry] = await Promise.all([
                import('three'),
-               import('three/addons/controls/OrbitControls.js'),
+               //import('three/addons/controls/OrbitControls.js'),
+               import('three/addons/controls/TrackballControls.js'),
                import('three/addons/lines/Line2.js'),
                import('three/addons/lines/LineMaterial.js'),
                import('three/addons/lines/LineGeometry.js')
             ])
             threeModule = module;
             threeAddOns = { 
-                'OrbitControls': OrbitControls.OrbitControls,
+                //'OrbitControls': OrbitControls.OrbitControls,
+                'TrackballControls': TrackballControls.TrackballControls,
                 'Line2': Line2.Line2,
                 'LineMaterial': LineMaterial.LineMaterial,
                 'LineGeometry': LineGeometry.LineGeometry
@@ -171,8 +174,9 @@ ThreeJS.prototype = {
         this.renderer.setSize( containerElem.clientWidth, containerElem.clientHeight );
         this.renderer.setPixelRatio(window.devicePixelRatio);
 
-        this.camera = new threeModule.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 500 );
-        this.controls = new threeAddOns.OrbitControls( this.camera, this.renderer.domElement );
+        this.camera = new threeModule.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 2000 );
+        //this.controls = new threeAddOns.OrbitControls( this.camera, this.renderer.domElement );
+        this.controls = new threeAddOns.TrackballControls( this.camera, this.renderer.domElement );
         this.camera.position.set( 0, 0, 100 );
         this.camera.lookAt( 0, 0, 0 );
 
@@ -188,7 +192,7 @@ ThreeJS.prototype = {
             }
             // any other animations
             requestAnimationFrame(animate)
-            //controls.update()
+            this.controls.update()
             this.renderer.render( this.scene, this.camera );
         }
         animate();
@@ -207,6 +211,8 @@ ThreeJS.prototype = {
         this.camera.position.set(sphere.center.x, sphere.center.y, dist * 2.0); // fudge factor so you can see the boundaries
         this.camera.lookAt(sphere.center);
         this.controls.target = sphere.center;
+        this.controls.minDistance = dist/10; 
+        this.controls.maxDistance = dist*10;
     },
     nextPlotColor: function() {
         const color = this.colorCycle[this.nextColorIndex];
