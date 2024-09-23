@@ -1,3 +1,8 @@
+/**
+ * @file MRtrix3 .tck file parser
+ * @author Rembrandt Bakker
+ */
+
 function systemByteOrderLittleEndian() {
     const test = new Uint16Array(1);
     test[0] = 348;
@@ -5,7 +10,12 @@ function systemByteOrderLittleEndian() {
     return (dataView.getUint16(0,true) === 348)
 }
 
-export function parseTckHeader(fileAsArrayBuffer) {
+/** 
+* Parse the binary header of a MRtrix3 .tck file.
+* @param {ArrayBuffer} fileAsArrayBuffer - File contents as a byte array buffer
+* @return {Object} File header as a set of key-value pairs
+*/
+export function parseHeader(fileAsArrayBuffer) {
     const enc = new TextDecoder("utf-8");
     const fileAsText = enc.decode(fileAsArrayBuffer);
     const lines = fileAsText.split('\n');
@@ -29,33 +39,21 @@ export function parseTckHeader(fileAsArrayBuffer) {
     return header;
 }
 
-function getTracts(typedArrayData) {
-    const tracts = [];
-    let iPrev = 0;
-    for (let i=0; i<typedArrayData.length/3; i++) {
-        if (isNaN(typedArrayData[3*i]) || !isFinite(typedArrayData[3*i])) {
-            const tractLength = i-iPrev;
-            if (tractLength>0) {
-                const byteOffset = typedArrayData.byteOffset+3*iPrev*typedArrayData.BYTES_PER_ELEMENT;
-                //console.log('byteOffset',byteOffset);
-                tracts.push(
-                    new typedArrayData.constructor(
-                        typedArrayData.buffer,
-                        byteOffset,
-                        3*tractLength
-                    )
-                );
-            }
-            iPrev = i+1;
-        }
-    }
-    return tracts;
-}
-
-export function parseTck(fileAsArrayBuffer,header) {
+/** 
+* Parse both header and tracts from a MRtrix3 .tck file
+* @param {ArrayBuffer} fileAsArrayBuffer - File contents as a byte array buffer
+* @param {Object} [header] - File header if previously parsed
+* @param {number} [maxNumTracts=0] - Maximum number of tracts to extract, 0 to extract all.
+* @return {Array} Extracted header and tracts
+*/
+export function parseContents(fileAsArrayBuffer,header,maxNumTracts) {
+    // get header
     if (header === undefined) {
-        header = parseTckHeader(fileAsArrayBuffer)
+        header = parseHeader(fileAsArrayBuffer)
     }
+    if (!maxNumTracts) maxNumTracts = 1e10;
+
+    // extract typed array
     const byteOffset = header.file.split(' ').pop();
     let dtype = header.datatype;
     const M = dtype.match(/^([a-zA-Z]+)(\d+)([a-zA-Z]+)$/);
@@ -82,10 +80,26 @@ export function parseTck(fileAsArrayBuffer,header) {
             data[i] = dataView[getType](i,littleEndian);
         }
     }
-    return [header,getTracts(data)];
-}
 
-export function tractsAsPlotly(tracts) {
-    
+    // parse tracts
+    const tracts = [];
+    let iPrev = 0;
+    for (let i=0; i<data.length/3; i++) {
+        if (isNaN(data[3*i]) || !isFinite(data[3*i])) {
+            const tractLength = i-iPrev;
+            if (tractLength>0) {
+                const byteOffset = data.byteOffset+3*iPrev*data.BYTES_PER_ELEMENT;
+                tracts.push(
+                    new data.constructor(
+                        data.buffer,
+                        byteOffset,
+                        3*tractLength
+                    )
+                );
+                if (tracts.length >= maxNumTracts) break;
+            }
+            iPrev = i+1;
+        }
+    }
+    return [header,tracts];
 }
-

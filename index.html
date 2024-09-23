@@ -94,28 +94,19 @@ function getMaxTracts() {
     return maxTracts;
 }
 
-async function renderTck(tckPromise, tckParser) {
-    const [contents,tckName] = await tckPromise;
-    const [header,tracts] = tckParser.parseTck(contents);
-    console.log(header)
-    
+async function renderTracts(tractsPromise,maxNumTracts) {
+    const [contents,tractsName] = await tractsPromise;
     if (threeInstance) {
-        threeInstance.addTracts(header,tracts,threeInstance.nextPlotColor());
+        await threeInstance.addTracts(contents,tractsName,maxNumTracts,threeInstance.nextPlotColor());
         threeInstance.centerView();
     } else {
-        plotlyInstance.addTracts(tckName,header,tracts)
+        plotlyInstance.addTracts(contents,tractsName,maxNumTracts);
     }
 }
 
-async function renderTrk(trkPromise, trkParser) {
-    const [contents,trkName] = await trkPromise;
-    const [header,tracts] = trkParser.parseTrkHeader(contents);
-    console.log(header)
-}
-
 async function renderMesh(meshPromise) {
+    const [contents,meshName] = await meshPromise;
     if (threeInstance) {
-        const [contents,meshName] = await meshPromise;
         threeInstance.addMesh(contents,meshName)
         threeInstance.centerView();
     } else {
@@ -225,7 +216,17 @@ ThreeJS.prototype = {
         this.nextColorIndex = (this.nextColorIndex+1) % this.colorCycle.length;
         return color;
     },
-    addTracts: async function(header,tracts,hexColor) {
+    addTracts: async function(contents,tractsName,maxNumTracts,hexColor) {
+        let parser;
+        if (tractsName.toLowerCase().endsWith('.tck')) {
+            parser = await import('./tckparser.js');
+        }
+        if (tractsName.toLowerCase().endsWith('.trk')) {
+            parser = await import('./trkparser.js');
+        }
+        const [header,tracts] = parser.parseContents(contents,undefined,maxNumTracts);
+console.log(tractsName,'header',header);
+
         // addons.Line2 supports linewidth and gives prettier results.
         // module.Line does not support linewidth but may offer better performance.
         const useLine2 = true;
@@ -270,7 +271,6 @@ ThreeJS.prototype = {
         let geometry = (new Loader()).parse(contents);
         if (geometry.type == 'Group') geometry = geometry.children[0];
         if (geometry.geometry) geometry = geometry.geometry;
-console.log(geometry)
         geometry.computeVertexNormals();
 
         //const hemiLight = new threeModule.HemisphereLight( 0xffffff, 0x000000, 3 );
@@ -309,7 +309,16 @@ PlotlyJS.prototype = {
     clear: function() {
         Plotly.purge(this.containerElem);
     },
-    addTracts: function(name,header,tracts) {
+    addTracts: async function(contents,tractsName) {
+        let parser;
+        if (tractsName.toLowerCase().endsWith('.tck')) {
+            parser = await import('./tckparser.js');
+        }
+        if (tractsName.toLowerCase().endsWith('.trk')) {
+            parser = await import('./trkparser.js');
+        }
+        const [header,tracts] = parser.parseContents(contents);
+
         // initialize plotly data
         const plotlyData = [];
         const plotlyLayout = { }
@@ -333,27 +342,22 @@ PlotlyJS.prototype = {
             y.push(NaN);
             z.push(NaN);
         }
-        plotlyData.push({ x,y,z, name:name, type:"scatter3d",mode:"lines", marker: { symbol: 'circle-closed-dot',size:3,line: { 'width':1 } } });
+        plotlyData.push({ x,y,z, name:tractsName, type:"scatter3d",mode:"lines", marker: { symbol: 'circle-closed-dot',size:3,line: { 'width':1 } } });
         Plotly.addTraces(this.containerElem, plotlyData);
     }
 }
 
 async function renderScene(evt) {
-    const tckPromises = []
-    const trkPromises = []
+    const tractsPromises = []
     const meshPromises = []
     
     if (evt.target.value == 'example.tck') {
-        tckPromises.push( fetch('./data/example.tck').then( async (response) => [await response.arrayBuffer(),'example.tck'] ) );
+        tractsPromises.push( fetch('./data/example.tck').then( async (response) => [await response.arrayBuffer(),'example.tck'] ) );
     } else {
         let hit = false;
         for (let file of evt.target.files) {
-            if (file.name.toLowerCase().endsWith('.tck')) {
-                tckPromises.push(readFileAsArrayBuffer(file));
-                hit = true;
-            }
-            if (file.name.toLowerCase().endsWith('.trk')) {
-                trkPromises.push(readFileAsArrayBuffer(file));
+            if (file.name.toLowerCase().endsWith('.tck') || file.name.toLowerCase().endsWith('.trk')) {
+                tractsPromises.push(readFileAsArrayBuffer(file));
                 hit = true;
             }
             if (file.name.toLowerCase().endsWith('.vtk') || file.name.toLowerCase().endsWith('.obj')) {
@@ -361,21 +365,13 @@ async function renderScene(evt) {
                 hit = true;
             }
         }
-        if (!hit) throw('No .tck/.trk/.vtk files among '+evt.target.files.length+' selected files.');
+        if (!hit) throw('No .tck/.trk/.vtk/.obj files among '+evt.target.files.length+' selected files.');
     }
     
     await initGraphics();
-    if (tckPromises.length) {
-        const tckParser = await import('./tckparser.js');
-        for (let tckPr of tckPromises) {
-            renderTck(tckPr, tckParser)
-        }
-    }
-    if (trkPromises.length) {
-        const trkParser = await import('./trkparser.js');
-        for (let trkPr of trkPromises) {
-            renderTrk(trkPr, trkParser)
-        }
+    const maxTracts = getMaxTracts();
+    for (let tractsPr of tractsPromises) {
+        renderTracts(tractsPr,maxTracts)
     }
     for (let meshPr of meshPromises) {
         renderMesh(meshPr)
