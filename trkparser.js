@@ -195,42 +195,6 @@ export function parseHeader(fileAsArrayBuffer) {
 }
 
 
-function getTracts(fileAsArrayBuffer,header,maxNumTracts) {
-    const view = new DataView(fileAsArrayBuffer)
-    const littleEndian = header.little_endian;
-    const numScalars = header.n_scalars;
-    const numProperties = header.n_properties;
-    let byteOffset = header.hdr_size;
-    let numTracts = header.n_count;
-    if (maxNumTracts) numTracts = Math.min(maxNumTracts,numTracts);
-    const tracts = [];
-    for (let tr=0; tr<numTracts; tr++) {
-        let numPoints = view.getUint32(byteOffset,littleEndian);
-        byteOffset += 4;
-        let floatsPerPoint = 3+numScalars;
-        const dataBuffer = fileAsArrayBuffer.slice(byteOffset,byteOffset+floatsPerPoint*4*numPoints);
-        byteOffset += dataBuffer.byteLength;
-        let v = new Float32Array(dataBuffer);
-        if (numScalars) {
-            // only keep x,y,z, ignore additional scalars
-            let k=0;
-            for (let i=0; i<numPoints; i++) {
-                if (i%floatsPerPoint < 3) {
-                    v[k] = v[i];
-                    k += 1;
-                }
-            }
-            v = v.slice(0,3*numPoints);
-        }
-        tracts.push(v);
-        // ignore additional tract properties
-        byteOffset += numProperties*4;
-
-    }
-    return tracts;
-}
-
-
 /** 
 * Parse both header and tracts from a TrackVis .trk file
 * @param {ArrayBuffer} fileAsArrayBuffer - File contents as a byte array buffer
@@ -275,6 +239,6 @@ export function parseContents(fileAsArrayBuffer,header,maxNumTracts) {
 
     }
     
-    const tracts = getTracts(fileAsArrayBuffer,header,maxNumTracts);
+    //const tracts = getTracts(fileAsArrayBuffer,header,maxNumTracts);
     return [header,tracts];
 }
