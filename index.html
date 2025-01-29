@@ -1,5 +1,7 @@
 <!doctype html>
 <html>
+<head>
+
 <style>
 body,div,table,canvas {
     box-sizing: border-box;
@@ -11,18 +13,6 @@ ul {
   margin: 1ex 0ex;
 }
 </style>
-<body style="width:100%; height:100vh; overflow-y:scroll"><div id="controls" style="position:absolute; padding: 1ex; z-index:10">
-Render options<ul>
-<li>webgl library: <select id="webglLibrary"><option>Plotly.js</option><option selected>Three.js</option></select></li>
-<li>limit tracts per bundle: <input id="maxTracts" type="string" value="500"></li>
-</ul>
-Load tract<ul>
-<li>from this computer, select one or more .tck files: <input type="file" onchange="renderScene(event)" multiple/></li> 
-<li>from this computer, select folder to scan for .tck files recursively: <input type="file" onchange="renderScene(event)" directory webkitdirectory multiple/></li>
-<li>from <input type="button" value="example.tck" onclick="renderScene(event)"> (<a href="https://github.com/rordenlab/TractographyFormat">source</a>)</li>
-</ul>
-Check console (F12) for file header(s).
-</div><div id="webglContainer" style="position: relative; width:100%; height:100vh"></div>
 
 <script type="x-shader/x-vertex" id="glass_vertexShader">
   // glass shader (copied from SBA)
@@ -61,68 +51,109 @@ Check console (F12) for file header(s).
 <script type="importmap">
   {
     "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"
+      "three": "./jsm/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/",
+      "threegx": "./jsm/threegx.js",
+      "graphxtree": "./jsm/graphxtree.js"
     }
   }
 </script>
+
 <script type="module">
+window.bodyOnload = async () => {
+//    const { GraphxObject,GraphxTree } = await import('graphxtree');
+//    var graphxtree = new GraphxTree('graphxtree');
+}
+</script>
 
-let plotlyModule = undefined;
-let plotlyInstance = undefined;
+</head>
+<body onload="bodyOnload()" style="width:100%; height:100vh; overflow-y:scroll">
+<div id="controls" style="position:relative; padding: 1ex; z-index:10">
+Load tract<ul>
+<li>from this computer, select one or more .tck files: <input type="file" onchange="renderScene(event)" multiple/></li> 
+<li>from this computer, select folder to scan for .tck files recursively: <input type="file" onchange="renderScene(event)" directory webkitdirectory multiple/></li>
+<li>from <input type="button" value="example.tck" onclick="renderScene(event)"> (<a href="https://github.com/rordenlab/TractographyFormat">source</a>)</li>
+<li>limit tracts per bundle: <input id="maxTracts" type="string" value="500"></li>
+</ul>
+Check console (F12) for file header(s).
+</div>
+<div id="graphxtree" style="position: relative; width:300px;border:1px solid red; z-index:10"></div>
+<div id="webglContainer" style="position: absolute; top:0px; width:100%; height:100vh"></div>
 
-let threeModule = undefined;
-let threeAddOns = undefined;
-let threeInstance = undefined;
+<!-- 
+"three": "https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js"
+-->
+<script type="module">
+const Graphx = await import('./jsm/graphxtree.js');
+
+//let plotlyModule = undefined;
+//let plotlyInstance = undefined;
+
+//let threeModule = undefined;
+//let threeAddOns = undefined;
+//let threeInstance = undefined;
 
 function readFileAsArrayBuffer(file){
   return new Promise((resolve, reject) => {
       var fr = new FileReader();  
       fr.onload = () => {
-          resolve([fr.result,file.name] )
+          resolve([fr.result,file.name] );
       };
       fr.onerror = reject;
       fr.readAsArrayBuffer(file);
   });
 }
 
+class ColorCycle {
+    constructor() {
+        this.colorCycle = [0x1f77b4, 0xff7f0e, 0x2ca02c, 0xd62728, 0x9467bd, 0x8c564b, 0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf];
+        this.nextColorIndex = 0;
+    }
+    
+    nextPlotColor() {
+        const color = this.colorCycle[this.nextColorIndex];
+        this.nextColorIndex = (this.nextColorIndex+1) % this.colorCycle.length;
+        return color;
+    }
+}
+
+const colorCycle = new ColorCycle();
+
 function getMaxTracts() {
-    const elem = document.getElementById('maxTracts')
-    let maxTracts = parseInt(elem.value)
-    if (!maxTracts) maxTracts = 100
-    elem.value = maxTracts 
+    const elem = document.getElementById('maxTracts');
+    let maxTracts = parseInt(elem.value);
+    if (!maxTracts) maxTracts = 100;
+    elem.value = maxTracts;
     return maxTracts;
 }
 
-async function renderTracts(tractsPromise,maxNumTracts) {
+async function renderTracts(tractsPromise,maxNumTracts,graphxTree) {
     const [contents,tractsName] = await tractsPromise;
-    if (threeInstance) {
-        await threeInstance.addTracts(contents,tractsName,maxNumTracts,threeInstance.nextPlotColor());
-        threeInstance.centerView();
-    } else {
-        plotlyInstance.addTracts(contents,tractsName,maxNumTracts);
-    }
+    const node = new Graphx.GraphxNode(tractsName);
+    graphxTree.addNode(node);
+    node.renderGraphx(contents,tractsName,'tracts',{maxNumTracts,color:colorCycle.nextPlotColor()});
+    //await threeInstance.addTracts(contents,tractsName,maxNumTracts,threeInstance.nextPlotColor());
+    //threeInstance.centerView();
 }
 
-async function renderMesh(meshPromise) {
+async function renderMesh(meshPromise,graphxTree) {
     const [contents,meshName] = await meshPromise;
-    if (threeInstance) {
-        threeInstance.addMesh(contents,meshName)
-        threeInstance.centerView();
-    } else {
-        console.log('Mesh file rendering not supported by Plotly.js.')
-    }
+    const node = new Graphx.GraphxNode(meshName);
+    graphxTree.addNode(node);
+    node.renderGraphx(contents,meshName,'mesh');
+    //    threeInstance.addMesh(contents,meshName);
+    //    threeInstance.centerView();
 }
 
 async function initGraphics() {
     // cleanup previous mess
     if (threeInstance) {
-        threeInstance.clear()
-        threeInstance = undefined
+        threeInstance.clear();
+        threeInstance = undefined;
     }
     if (plotlyInstance) {
-        plotlyInstance.clear()
-        plotlyInstance = undefined
+        plotlyInstance.clear();
+        plotlyInstance = undefined;
     }
     const containerElem = document.getElementById('webglContainer');
     containerElem.innerHTML = '';
@@ -135,6 +166,7 @@ async function initGraphics() {
         }
         plotlyInstance = new PlotlyJS(containerElem);
     } else {
+        /*
         if (threeModule === undefined || threeAddOns === undefined) {
             const [module,TrackballControls,Line2,LineMaterial,LineGeometry] = await Promise.all([
                import('three'),
@@ -154,142 +186,7 @@ async function initGraphics() {
             }
         }
         threeInstance = new ThreeJS(containerElem);
-    }
-}
-
-function ThreeJS(containerElem) {
-    this.init(containerElem);
-    this.colorCycle = [0x1f77b4, 0xff7f0e, 0x2ca02c, 0xd62728, 0x9467bd, 0x8c564b, 0xe377c2, 0x7f7f7f, 0xbcbd22, 0x17becf];
-    this.nextColorIndex = 0;
-}
-
-ThreeJS.prototype = {
-    init: function(containerElem) {
-        this.renderer = new threeModule.WebGLRenderer({ antialias: true });
-        containerElem.appendChild( this.renderer.domElement );    
-        this.renderer.domElement.style = "position: relative; width:100%; height:100%";
-        this.renderer.setSize( containerElem.clientWidth, containerElem.clientHeight );
-        this.renderer.setPixelRatio(window.devicePixelRatio);
-
-        this.camera = new threeModule.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 2000 );
-        //this.controls = new threeAddOns.OrbitControls( this.camera, this.renderer.domElement );
-        this.controls = new threeAddOns.TrackballControls( this.camera, this.renderer.domElement );
-        this.camera.position.set( 0, 0, 100 );
-        this.camera.lookAt( 0, 0, 0 );
-
-        this.scene = new threeModule.Scene();
-        this.scene.background = new threeModule.Color( 0xffffff );
-        //this.scene.fog = new threeModule.FogExp2( 0xcccccc, 0.004 );
-        
-        this.stopAnimation = false;
-        const animate = () => {
-            if (this.stopAnimation) {
-                console.log('animation stopped')
-                return;
-            }
-            // any other animations
-            requestAnimationFrame(animate)
-            this.controls.update()
-            this.renderer.render( this.scene, this.camera );
-        }
-        animate();
-    },
-    clear: function() {
-        this.stopAnimation = true;
-        if (this.renderer) this.renderer.clear();
-    },
-    centerView: function() {
-        // Inspiration: https://stackoverflow.com/questions/14614252/how-to-fit-camera-to-object
-        // get the tracts into view of the camera
-        let bBox = new threeModule.Box3().setFromObject(this.scene);
-        const sphere = new threeModule.Sphere();
-        bBox.getBoundingSphere(sphere);
-        const dist = sphere.radius / (2 * Math.tan(this.camera.fov * Math.PI / 360));
-        this.camera.position.set(sphere.center.x, sphere.center.y, dist * 2.0); // fudge factor so you can see the boundaries
-        this.camera.lookAt(sphere.center);
-        this.controls.target = sphere.center;
-        this.controls.minDistance = dist/10; 
-        this.controls.maxDistance = dist*10;
-    },
-    nextPlotColor: function() {
-        const color = this.colorCycle[this.nextColorIndex];
-        this.nextColorIndex = (this.nextColorIndex+1) % this.colorCycle.length;
-        return color;
-    },
-    addTracts: async function(contents,tractsName,maxNumTracts,hexColor) {
-        let parser;
-        if (tractsName.toLowerCase().endsWith('.tck')) {
-            parser = await import('./tckparser.js');
-        }
-        if (tractsName.toLowerCase().endsWith('.trk')) {
-            parser = await import('./trkparser.js');
-        }
-        const [header,tracts] = parser.parseContents(contents,undefined,maxNumTracts);
-console.log(tractsName,'header',header);
-
-        // addons.Line2 supports linewidth and gives prettier results.
-        // module.Line does not support linewidth but may offer better performance.
-        const useLine2 = true;
-        if (hexColor === undefined) hexColor = 0x0000ff;
-
-        //create a LineBasicMaterial
-        let material;
-        if (useLine2) {
-            material = new threeAddOns.LineMaterial( { color: hexColor, linewidth: 1.2 } );
-        } else {
-            material = new threeModule.LineBasicMaterial( { color: hexColor } );
-        }
-        
-        const maxTracts = getMaxTracts();
-        const numTracts = (tracts.length>maxTracts ? maxTracts : tracts.length);
-        for (let i=0; i<numTracts; i++) {
-            const tr = tracts[i];
-            let line;
-            if (useLine2) {
-                const geometry = new threeAddOns.LineGeometry();
-                geometry.setPositions( tr );
-                line = new threeAddOns.Line2( geometry, material );
-            } else {
-                const geometry = new threeModule.BufferGeometry();
-                geometry.setAttribute( 'position', new threeModule.BufferAttribute( tr, 3 ) );
-                line = new threeModule.Line( geometry, material);
-            }
-            this.scene.add( line );
-        }
-    },
-    addMesh: async function(contents,meshName) {
-        let Loader
-        if (meshName.toLowerCase().endsWith('vtk')) {
-            let VTKLoader = await import('three/addons/loaders/VTKLoader.js')
-            Loader = VTKLoader.VTKLoader;
-        } else if (meshName.toLowerCase().endsWith('obj')) {
-            let OBJLoader = await import('three/addons/loaders/OBJLoader.js')
-            Loader = OBJLoader.OBJLoader;
-            const decoder = new TextDecoder();
-            contents = decoder.decode( contents );
-        } 
-        let geometry = (new Loader()).parse(contents);
-        if (geometry.type == 'Group') geometry = geometry.children[0];
-        if (geometry.geometry) geometry = geometry.geometry;
-        geometry.computeVertexNormals();
-
-        //const hemiLight = new threeModule.HemisphereLight( 0xffffff, 0x000000, 3 );
-        //this.scene.add( hemiLight );
-
-  			const material = new threeModule.ShaderMaterial( {
-						uniforms: { 
-              'diffuseColor': { value: new threeModule.Color(0x777777) },
-              'transparency': { value: 0.3 },
-              'edgeEffect': { value: 1 },
-            },
-						vertexShader: document.getElementById( 'glass_vertexShader' ).textContent,
-						fragmentShader: document.getElementById( 'glass_fragmentShader' ).textContent,
-						side: threeModule.DoubleSide,
-						alphaToCoverage: true // only works when WebGLRenderer's "antialias" is set to "true"
-        } );
-
-        const mesh = new threeModule.Mesh( geometry, material );
-        this.scene.add( mesh );
+        */
     }
 }
 
@@ -368,14 +265,20 @@ async function renderScene(evt) {
         if (!hit) throw('No .tck/.trk/.vtk/.obj files among '+evt.target.files.length+' selected files.');
     }
     
-    await initGraphics();
+    const { ThreeGx } = await import('threegx');
+    const containerElem = document.getElementById('webglContainer');
+    const gxEngine = new ThreeGx(containerElem);
+    const gxTree = new Graphx.GraphxTree(gxEngine);
+    
+    //await initGraphics();
     const maxTracts = getMaxTracts();
     for (let tractsPr of tractsPromises) {
-        renderTracts(tractsPr,maxTracts)
+        await renderTracts(tractsPr,maxTracts,gxTree)
     }
     for (let meshPr of meshPromises) {
-        renderMesh(meshPr)
+        await renderMesh(meshPr,gxTree)
     }
+    gxTree.renderTree("graphxtree");
 }
 window.renderScene = renderScene;
 </script>
