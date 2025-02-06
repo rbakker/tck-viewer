@@ -1,3 +1,4 @@
+// helper routines for adding elements to the Document Object Model
 class DomElem {
     constructor(elem,attrs) {
         if (typeof elem === 'string') {
@@ -16,14 +17,43 @@ class DomElem {
     }
 }
 
+// shorthand for DomElem constructor
 function el(elem,attrs) {
     return new DomElem(elem,attrs)
 }
 
+// data sources can be: File (later add Zip, Message)
+class DataSource {
+    constructor(dataPromise,dataType) {
+        this.dataPromise = dataPromise;
+        this.dataType = dataType;
+    }
+    // usage: contents = await dataSource.load();
+    async load() {
+        if (this.dataPromise instanceof File) {
+            return new Promise((resolve, reject) => {
+                const fr = new FileReader();  
+                fr.onload = () => {
+                    resolve(fr.result);
+                };
+                fr.onerror = reject;
+                fr.readAsArrayBuffer(this.dataPromise);
+            });
+        } else {
+            return this.dataPromise;
+        }
+    }
+    get type() { 
+        return this.dataType 
+    }
+}
+
 // parent class of all graphics nodes in the graphx tree
 class GraphxNode {
-    constructor(name) {
+    constructor(name,dataPromise,dataType) {
         this.name = name;
+        this.dataSource = false
+        if (dataPromise) this.dataSource = new DataSource(dataPromise,dataType);
         this.children = [];
         this.domElem = false;
         this.parent = false;
@@ -44,20 +74,6 @@ class GraphxNode {
         else return this;
     }
 
-    // [parent]
-    //     [expand/hide controls][summary/]
-    //     [list]
-    //         [toggleStatus/][item]
-    //            [title][menuButtons]button1|button2[/menuButtons]Title Text[/title]
-    //            [content][/content]
-    //         [/item]
-    //         [toggleStatus/][item]
-    //            [title][menuButtons]button1|button2[/menuButtons]Title Text[/title]
-    //            [content][/content]
-    //         [/item]
-    //     [/list]
-    // [/parent]
-        
     expandBtn() {
         return el('input',{
             type:'checkbox',
@@ -69,20 +85,21 @@ class GraphxNode {
     }
     
     renderTree(domElem) {
-        // document-object-model element
-        if (!domElem) throw('Cannot render GraphxNode without domElem');
+        // domElem is the document-object-model element that will contain the tree
         if (typeof(domElem) == 'string') domElem = document.getElementById(domElem);
-        if (domElem.childNodes.length) domElem.innerHTML = '';
+        if (!domElem) throw('Cannot render GraphxNode without domElem');
+        if (this.domElem) {
+            if (this.domElem === domElem) {
+                this.domElem.innerHTML = '';
+            }
+            this.headerElem = undefined
+            this.bodyElem = undefined
+        }
         this.domElem = domElem;
         
         // header
-        let headerElem = this.headerElem;
-        if (headerElem) {
-            headerElem.innerHTML = '';
-        } else {
-            headerElem = el('div',{class:'gtHeader',style:"width:100%;border:1px solid green"}).elem;
-            el(domElem).append(headerElem);
-        }
+        const headerElem = el('div',{class:'gtHeader',style:"width:100%;border:1px solid green"}).elem;
+        el(domElem).append(headerElem);
         el(headerElem).append(
             this.expandBtn(),
             el('b',{innerHTML:this.name}).elem
@@ -90,49 +107,84 @@ class GraphxNode {
         this.headerElem = headerElem;
         
         // body of child nodes
-        let bodyElem = this.bodyElem;
-        if (bodyElem) {
-            bodyElem.innerHTML = '';
-        } else {
-            bodyElem = el('div',{class:'gtBody',style:"width:100%;border:1px solid cyan"}).elem;
-            el(domElem).append(bodyElem);
-        }
+        const bodyElem = el('div',{class:'gtBody'}).elem;
+        el(domElem).append(bodyElem);
         this.bodyElem = bodyElem;
         
         for (let ch of this.children) {
-            let childElem = el('div',{class:'gtItem',style:"padding-left:1ex;width:100%;border:1px solid blue"}).elem;
+            let childElem = el('div',{class:'gtItem',style:"padding-left:1ex;width:100%"}).elem;
             el(bodyElem).append(childElem);
             ch.renderTree(childElem);
         }
     }
     
-    async renderGraphx(contents,name,type,settings) {
-        let gxObject;
-        if (type=='tracts') {
-            const gxEngine = this.getRoot().gxEngine;
-            gxObject = await gxEngine.addTracts(contents,name,settings.maxNumTracts,settings.color);
-            gxEngine.centerView();
+    async renderScene(dataPromise,name) {
+        const contents = dataPromise instanceof Promise ? await dataPromise : dataPromise;
+        const utf8decoder = new TextDecoder();
+        
+        const jsYaml = await import('./js-yaml.mjs');
+        const config = jsYaml.load( utf8decoder.decode(contents) );
+        if (!config) throw('Could not parse scene data, aborting.');
+        
+        const root = this.getRoot()
+        const name2node = {}
+        for (let id in root.nodeById) {
+            const node = root.nodeById[id]
+            if (node.name in name2node) console.log('Multiple nodes named '+node.name+' encountered, selecting the last added node.')
+            name2node[node.name] = node;
+        }
+console.log(config);                
+        if (config.scene && config.scene.dataSources) {
+            for (let src of config.scene.dataSources) {
+                // CONTINUE HERE, DO SOMETHING WITH THE NODE
+console.log(src);                
+            }
+        }
+        
+    }
+    
+    async renderGraphx(attrs) {
+        const contents = await this.dataSource.load();
+        const name = this.name;
+        const type = this.dataSource.dataType;
+        let webglObject;
+        const webglEngine = this.getRoot().webglEngine;
+        if (type=='track') {
+            webglObject = await webglEngine.addTrack(contents,name,attrs);
+            webglEngine.centerView();
         }
         if (type=='mesh') {
-            const gxEngine = this.getRoot().gxEngine;
-            gxObject = await gxEngine.addMesh(contents,name);
-            gxEngine.centerView();
+            webglObject = await webglEngine.addMesh(contents,name,attrs);
+            webglEngine.centerView();
         }
-        this.gxObject = gxObject;
+        if (type=='volume') {
+            webglObject = await webglEngine.addVolume(contents,name,attrs);
+            webglEngine.centerView();            
+        }
+        /*
+        if (type=='scene') {
+            webglObject = await webglEngine.addScene(contents,name,attrs);
+            webglEngine.centerView();
+        }
+        */
+        this.webglObject = webglObject;
     }
     
     toggleGraphx(makeVisible) {
-        if (makeVisible === undefined) makeVisible = !this.gxObject.visible;
-        this.gxObject.visible = makeVisible;
+        if (!this.webglObject) return;
+        if (makeVisible === undefined) makeVisible = !this.webglObject.visible;
+        this.webglObject.visible = makeVisible;
+        const webglEngine = this.getRoot().webglEngine;
+        webglEngine.render();
     }
 }
 
 // generates/manipulates tree of all nodes that contribute to a scene
 class GraphxTree extends GraphxNode {
     // rootDiv is the element in the html document tree that layouts the tree.
-    constructor(gxEngine) {
+    constructor(webglEngine) {
         super('__GraphxTree__');
-        this.gxEngine = gxEngine;
+        this.webglEngine = webglEngine;
         this.idCounter = 0;
         this.nodeById = {};
     }

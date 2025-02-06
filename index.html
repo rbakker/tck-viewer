@@ -48,12 +48,13 @@ ul {
   }
 </script>
 
+<!-- "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/", -->
 <script type="importmap">
   {
     "imports": {
       "three": "./jsm/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/",
-      "threegx": "./jsm/threegx.js",
+      "three/addons/": "./jsm/threejs/",
+      "threewebgl": "./jsm/threewebgl.js",
       "graphxtree": "./jsm/graphxtree.js"
     }
   }
@@ -61,30 +62,32 @@ ul {
 
 <script type="module">
 window.bodyOnload = async () => {
-//    const { GraphxObject,GraphxTree } = await import('graphxtree');
-//    var graphxtree = new GraphxTree('graphxtree');
+    const { ThreeWebGL } = await import('threewebgl');
+    const containerElem = document.getElementById('webglContainer');
+    const webglEngine = new ThreeWebGL(containerElem);
+    window.Graphx = await import('./jsm/graphxtree.js');
+    window.graphxTree = new Graphx.GraphxTree(webglEngine);
 }
 </script>
 
 </head>
 <body onload="bodyOnload()" style="width:100%; height:100vh; overflow-y:scroll">
 <div id="controls" style="position:relative; padding: 1ex; z-index:10">
-Load tract<ul>
-<li>from this computer, select one or more .tck files: <input type="file" onchange="renderScene(event)" multiple/></li> 
-<li>from this computer, select folder to scan for .tck files recursively: <input type="file" onchange="renderScene(event)" directory webkitdirectory multiple/></li>
-<li>from <input type="button" value="example.tck" onclick="renderScene(event)"> (<a href="https://github.com/rordenlab/TractographyFormat">source</a>)</li>
-<li>limit tracts per bundle: <input id="maxTracts" type="string" value="500"></li>
+Load tracks<ul>
+<li>from this computer, select one or more .tck files: <input type="file" onchange="renderAll(event)" multiple/></li> 
+<li>from this computer, select folder to scan for .tck files recursively: <input type="file" onchange="renderAll(event)" directory webkitdirectory multiple/></li>
+<li>from <input type="button" value="example.tck" onclick="renderAll(event)"> (<a href="https://github.com/rordenlab/TractographyFormat">source</a>)</li>
+<li>limit streamlines per bundle: <input id="maxStreamlines" type="string" value="500"></li>
 </ul>
 Check console (F12) for file header(s).
 </div>
-<div id="graphxtree" style="position: relative; width:300px;border:1px solid red; z-index:10"></div>
+<div id="graphxtree" style="position: relative; width:300px; z-index:10"></div>
 <div id="webglContainer" style="position: absolute; top:0px; width:100%; height:100vh"></div>
 
 <!-- 
 "three": "https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js"
 -->
 <script type="module">
-const Graphx = await import('./jsm/graphxtree.js');
 
 //let plotlyModule = undefined;
 //let plotlyInstance = undefined;
@@ -97,7 +100,7 @@ function readFileAsArrayBuffer(file){
   return new Promise((resolve, reject) => {
       var fr = new FileReader();  
       fr.onload = () => {
-          resolve([fr.result,file.name] );
+          resolve(fr.result);
       };
       fr.onerror = reject;
       fr.readAsArrayBuffer(file);
@@ -119,30 +122,30 @@ class ColorCycle {
 
 const colorCycle = new ColorCycle();
 
-function getMaxTracts() {
-    const elem = document.getElementById('maxTracts');
-    let maxTracts = parseInt(elem.value);
-    if (!maxTracts) maxTracts = 100;
-    elem.value = maxTracts;
-    return maxTracts;
+function getMaxStreamlines() {
+    const elem = document.getElementById('maxStreamlines');
+    let maxStreamlines = parseInt(elem.value);
+    if (!maxStreamlines) maxStreamlines = 100;
+    elem.value = maxStreamlines;
+    return maxStreamlines;
 }
 
-async function renderTracts(tractsPromise,maxNumTracts,graphxTree) {
-    const [contents,tractsName] = await tractsPromise;
-    const node = new Graphx.GraphxNode(tractsName);
+async function renderMesh(meshPromise,meshName,graphxTree) {
+    const node = new Graphx.GraphxNode(meshName,meshPromise,'mesh');
     graphxTree.addNode(node);
-    node.renderGraphx(contents,tractsName,'tracts',{maxNumTracts,color:colorCycle.nextPlotColor()});
-    //await threeInstance.addTracts(contents,tractsName,maxNumTracts,threeInstance.nextPlotColor());
-    //threeInstance.centerView();
+    node.renderGraphx(meshPromise,meshName,'mesh');
 }
 
-async function renderMesh(meshPromise,graphxTree) {
-    const [contents,meshName] = await meshPromise;
-    const node = new Graphx.GraphxNode(meshName);
+async function renderVolume(volumePromise,volumeName,graphxTree) {
+    const node = new Graphx.GraphxNode(volumeName,volumePromise,'volume');
     graphxTree.addNode(node);
-    node.renderGraphx(contents,meshName,'mesh');
-    //    threeInstance.addMesh(contents,meshName);
-    //    threeInstance.centerView();
+    node.renderGraphx(volumePromise,volumeName,'volume');
+}
+
+async function renderScene(scenePromise,sceneName,graphxTree) {
+    const node = new Graphx.GraphxNode(sceneName,scenePromise,'scene');
+    graphxTree.addNode(node);
+    node.renderScene(scenePromise,sceneName);
 }
 
 async function initGraphics() {
@@ -206,15 +209,15 @@ PlotlyJS.prototype = {
     clear: function() {
         Plotly.purge(this.containerElem);
     },
-    addTracts: async function(contents,tractsName) {
+    addTrack: async function(contents,trackName) {
         let parser;
-        if (tractsName.toLowerCase().endsWith('.tck')) {
+        if (trackName.toLowerCase().endsWith('.tck')) {
             parser = await import('./tckparser.js');
         }
-        if (tractsName.toLowerCase().endsWith('.trk')) {
+        if (trackName.toLowerCase().endsWith('.trk')) {
             parser = await import('./trkparser.js');
         }
-        const [header,tracts] = parser.parseContents(contents);
+        const [header,track] = parser.parseContents(contents);
 
         // initialize plotly data
         const plotlyData = [];
@@ -226,10 +229,10 @@ PlotlyJS.prototype = {
         const x = [];
         const y = [];
         const z = [];
-        const maxTracts = getMaxTracts();
-        const numTracts = (tracts.length>maxTracts ? maxTracts : tracts.length);
-        for (let i=0; i<numTracts; i++) {
-            const tr = tracts[i];
+        const maxStreamlines = getMaxStreamlines();
+        const numStreamlines = (track.length>maxStreamlines ? maxStreamlines : track.length);
+        for (let i=0; i<numStreamlines; i++) {
+            const tr = track[i];
             for (let j=0; j<tr.length/3; j++) {
                 x.push(tr[3*j]);
                 y.push(tr[3*j+1]);
@@ -239,47 +242,71 @@ PlotlyJS.prototype = {
             y.push(NaN);
             z.push(NaN);
         }
-        plotlyData.push({ x,y,z, name:tractsName, type:"scatter3d",mode:"lines", marker: { symbol: 'circle-closed-dot',size:3,line: { 'width':1 } } });
+        plotlyData.push({ x,y,z, name:trackName, type:"scatter3d",mode:"lines", marker: { symbol: 'circle-closed-dot',size:3,line: { 'width':1 } } });
         Plotly.addTraces(this.containerElem, plotlyData);
     }
 }
 
-async function renderScene(evt) {
-    const tractsPromises = []
+async function addDataSource(dataName,dataSource,dataType,attrs) {
+    const node = new Graphx.GraphxNode(dataName,dataSource,dataType);
+    window.graphxTree.addNode(node);
+    
+    // TMP FIX
+    //dataSource = readFileAsArrayBuffer(dataSource);
+    //console.log('Adding dataSource',dataSource)
+    await node.renderGraphx(attrs);
+}
+
+async function renderAll(evt) {
+    const trackPromises = []
     const meshPromises = []
+    const volumePromises = []
+    const scenePromises = []
     
     if (evt.target.value == 'example.tck') {
-        tractsPromises.push( fetch('./data/example.tck').then( async (response) => [await response.arrayBuffer(),'example.tck'] ) );
+        const dataSource = fetch('./data/example.tck').then( async (response) => await response.arrayBuffer() );
+        addDataSource('example.tck',dataSource,'track',{})
     } else {
         let hit = false;
         for (let file of evt.target.files) {
-            if (file.name.toLowerCase().endsWith('.tck') || file.name.toLowerCase().endsWith('.trk')) {
-                tractsPromises.push(readFileAsArrayBuffer(file));
+            const fname_lc = file.name.toLowerCase();
+            let attrs = {};
+            let dataType = undefined;
+            if (fname_lc.endsWith('.tck') || fname_lc.endsWith('.trk')) {
+                attrs = {maxStreamlines:getMaxStreamlines(),color:colorCycle.nextPlotColor()}
+                dataType= 'track'
                 hit = true;
             }
-            if (file.name.toLowerCase().endsWith('.vtk') || file.name.toLowerCase().endsWith('.obj')) {
-                meshPromises.push(readFileAsArrayBuffer(file));
+            if (fname_lc.endsWith('.vtk') || fname_lc.endsWith('.obj')) {
+                dataType= 'mesh'
                 hit = true;
             }
+            if (fname_lc.endsWith('.nrrd')) {
+                dataType= 'volume'
+                hit = true;
+            }
+            if (fname_lc.endsWith('scene.json') || fname_lc.endsWith('scene.yaml')) {
+                dataType= 'scene'
+            }
+            addDataSource(file.name,file,dataType,attrs)
         }
         if (!hit) throw('No .tck/.trk/.vtk/.obj files among '+evt.target.files.length+' selected files.');
     }
     
-    const { ThreeGx } = await import('threegx');
-    const containerElem = document.getElementById('webglContainer');
-    const gxEngine = new ThreeGx(containerElem);
-    const gxTree = new Graphx.GraphxTree(gxEngine);
-    
-    //await initGraphics();
-    const maxTracts = getMaxTracts();
-    for (let tractsPr of tractsPromises) {
-        await renderTracts(tractsPr,maxTracts,gxTree)
-    }
-    for (let meshPr of meshPromises) {
-        await renderMesh(meshPr,gxTree)
-    }
-    gxTree.renderTree("graphxtree");
+    //for (let trackPr of trackPromises) {
+    //    await renderTrack(...trackPr,maxStreamlines,window.graphxTree)
+    //}
+    //for (let meshPr of meshPromises) {
+    //    await renderMesh(...meshPr,window.graphxTree)
+    //}
+    //for (let volPr of volumePromises) {
+    //    await renderVolume(...volPr,window.graphxTree)
+    //}
+    //for (let scenePr of scenePromises) {
+    //    await renderScene(...scenePr,window.graphxTree)
+    //}
+    window.graphxTree.renderTree("graphxtree");
 }
-window.renderScene = renderScene;
+window.renderAll = renderAll;
 </script>
 </body></html>
