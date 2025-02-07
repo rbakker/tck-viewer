@@ -16,11 +16,11 @@ const threeAddOns = {
 }
 
 
-function ThreeWebGL(containerElem) {
+function ThreeEngine(containerElem) {
     this.init(containerElem);
 }
 
-ThreeWebGL.prototype = {
+ThreeEngine.prototype = {
     init: function(containerElem) {
         // Inspired by https://threejs.org/manual/#en/rendering-on-demand
         this.renderer = new threeModule.WebGLRenderer({ antialias: true });
@@ -48,43 +48,31 @@ ThreeWebGL.prototype = {
         
         this.render();
 
-        /*
-        this.stopAnimation = false;
-        const animate = () => {
-            if (this.stopAnimation) {
-                console.log('animation stopped')
-                return;
-            }
-            // any other animations
-            requestAnimationFrame(animate)
-            this.controls.update()
-            this.render();
-        }
-        animate();
-        */
-
         window.addEventListener('resize', () => this.render() );
     },
     clear: function() {
         this.stopAnimation = true;
         if (this.renderer) this.renderer.clear();
     },
-    render: function() {
-        this.renderer.render( this.scene, this.camera ) 
+    render: async function() {
+        await this.renderer.render( this.scene, this.camera ) 
     },
-    centerView: function() {
+    centerView: async function() {
+await this.render();
         // Inspiration: https://stackoverflow.com/questions/14614252/how-to-fit-camera-to-object
         // get the tracks into view of the camera
         let bBox = new threeModule.Box3().setFromObject(this.scene);
         const sphere = new threeModule.Sphere();
+this.render();
         bBox.getBoundingSphere(sphere);
-        const dist = sphere.radius / (2 * Math.tan(this.camera.fov * Math.PI / 360));
+console.log(bBox,this.scene,sphere);
+        const dist = (sphere.radius-sphere.center.x) / (2 * Math.tan(this.camera.fov * Math.PI / 360));
         this.camera.position.set(dist * 2.0, sphere.center.y, sphere.center.z); // fudge factor so you can see the boundaries
         this.camera.lookAt(sphere.center);
         this.controls.target = sphere.center;
         this.controls.minDistance = dist/10; 
         this.controls.maxDistance = dist*10;
-        this.render()
+        this.render();
     },
     addTrack: async function(contents,trackName,attrs) {
         const maxStreamlines = attrs.maxStreamlines || 10000;
@@ -301,4 +289,4 @@ ThreeWebGL.prototype = {
     }
 }
 
-export { ThreeWebGL }
+export { ThreeEngine }

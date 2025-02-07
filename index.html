@@ -54,7 +54,7 @@ ul {
     "imports": {
       "three": "./jsm/three.module.js",
       "three/addons/": "./jsm/threejs/",
-      "threewebgl": "./jsm/threewebgl.js",
+      "threeengine": "./jsm/threeengine.js",
       "graphxtree": "./jsm/graphxtree.js"
     }
   }
@@ -62,21 +62,36 @@ ul {
 
 <script type="module">
 window.bodyOnload = async () => {
-    const { ThreeWebGL } = await import('threewebgl');
+    const { ThreeEngine } = await import('threeengine');
     const containerElem = document.getElementById('webglContainer');
-    const webglEngine = new ThreeWebGL(containerElem);
+    const webglEngine = new ThreeEngine(containerElem);
     window.Graphx = await import('./jsm/graphxtree.js');
     window.graphxTree = new Graphx.GraphxTree(webglEngine);
+}
+
+window.allowDrop = (ev) => {
+  ev.preventDefault();
+}
+
+window.drag = (ev) => {
+  ev.dataTransfer.setData("text", ev.target.id);
+}
+
+
+window.drop = (ev) => {
+  console.log("File(s) dropped");
+  ev.preventDefault();
+  window.loadAll(ev);
 }
 </script>
 
 </head>
-<body onload="bodyOnload()" style="width:100%; height:100vh; overflow-y:scroll">
+<body onload="bodyOnload()" style="width:100%; height:100vh; overflow-y:scroll" ondrop="drop(event)" ondragover="allowDrop(event)">
 <div id="controls" style="position:relative; padding: 1ex; z-index:10">
-Load tracks<ul>
-<li>from this computer, select one or more .tck files: <input type="file" onchange="renderAll(event)" multiple/></li> 
-<li>from this computer, select folder to scan for .tck files recursively: <input type="file" onchange="renderAll(event)" directory webkitdirectory multiple/></li>
-<li>from <input type="button" value="example.tck" onclick="renderAll(event)"> (<a href="https://github.com/rordenlab/TractographyFormat">source</a>)</li>
+Load tracks by drag/drop or:<ul>
+<li>from this computer, select one or more .tck files: <input type="file" onchange="loadAll(event)" multiple/></li> 
+<li>from this computer, select folder to scan for .tck files recursively: <input type="file" onchange="loadAll(event)" directory webkitdirectory multiple/></li>
+<li>from <input type="button" value="example.tck" onclick="loadAll(event)"> (<a href="https://github.com/rordenlab/TractographyFormat">source</a>)</li>
 <li>limit streamlines per bundle: <input id="maxStreamlines" type="string" value="500"></li>
 </ul>
 Check console (F12) for file header(s).
@@ -88,13 +103,6 @@ Check console (F12) for file header(s).
 "three": "https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js"
 -->
 <script type="module">
-
-//let plotlyModule = undefined;
-//let plotlyInstance = undefined;
-
-//let threeModule = undefined;
-//let threeAddOns = undefined;
-//let threeInstance = undefined;
 
 function readFileAsArrayBuffer(file){
   return new Promise((resolve, reject) => {
@@ -148,132 +156,39 @@ async function renderScene(scenePromise,sceneName,graphxTree) {
     node.renderScene(scenePromise,sceneName);
 }
 
-async function initGraphics() {
-    // cleanup previous mess
-    if (threeInstance) {
-        threeInstance.clear();
-        threeInstance = undefined;
-    }
-    if (plotlyInstance) {
-        plotlyInstance.clear();
-        plotlyInstance = undefined;
-    }
-    const containerElem = document.getElementById('webglContainer');
-    containerElem.innerHTML = '';
-    // select engine
-    const elem = document.getElementById('webglLibrary');
-    const webglLibrary = elem.options[elem.selectedIndex].value;
-    if (webglLibrary == 'Plotly.js') {
-        if (plotlyModule === undefined) {
-            plotlyModule = await import('./jsm/plotly-2.32.0.min.js');
-        }
-        plotlyInstance = new PlotlyJS(containerElem);
-    } else {
-        /*
-        if (threeModule === undefined || threeAddOns === undefined) {
-            const [module,TrackballControls,Line2,LineMaterial,LineGeometry] = await Promise.all([
-               import('three'),
-               //import('three/addons/controls/OrbitControls.js'),
-               import('three/addons/controls/TrackballControls.js'),
-               import('three/addons/lines/Line2.js'),
-               import('three/addons/lines/LineMaterial.js'),
-               import('three/addons/lines/LineGeometry.js')
-            ])
-            threeModule = module;
-            threeAddOns = { 
-                //'OrbitControls': OrbitControls.OrbitControls,
-                'TrackballControls': TrackballControls.TrackballControls,
-                'Line2': Line2.Line2,
-                'LineMaterial': LineMaterial.LineMaterial,
-                'LineGeometry': LineGeometry.LineGeometry
-            }
-        }
-        threeInstance = new ThreeJS(containerElem);
-        */
-    }
-}
-
-function PlotlyJS(containerElem) {
-    this.init(containerElem);
-}
-
-PlotlyJS.prototype = {
-    init: function(containerElem) {
-        this.containerElem = containerElem;
-        const plotlyConfig = {
-            displayModeBar: false,
-            responsive: true
-        }
-        Plotly.newPlot(containerElem, [], {}, plotlyConfig);
-    },
-    clear: function() {
-        Plotly.purge(this.containerElem);
-    },
-    addTrack: async function(contents,trackName) {
-        let parser;
-        if (trackName.toLowerCase().endsWith('.tck')) {
-            parser = await import('./tckparser.js');
-        }
-        if (trackName.toLowerCase().endsWith('.trk')) {
-            parser = await import('./trkparser.js');
-        }
-        const [header,track] = parser.parseContents(contents);
-
-        // initialize plotly data
-        const plotlyData = [];
-        const plotlyLayout = { }
-        const plotlyConfig = {
-          displayModeBar: false,
-          responsive: true
-        }
-        const x = [];
-        const y = [];
-        const z = [];
-        const maxStreamlines = getMaxStreamlines();
-        const numStreamlines = (track.length>maxStreamlines ? maxStreamlines : track.length);
-        for (let i=0; i<numStreamlines; i++) {
-            const tr = track[i];
-            for (let j=0; j<tr.length/3; j++) {
-                x.push(tr[3*j]);
-                y.push(tr[3*j+1]);
-                z.push(tr[3*j+2]);
-            }
-            x.push(NaN);
-            y.push(NaN);
-            z.push(NaN);
-        }
-        plotlyData.push({ x,y,z, name:trackName, type:"scatter3d",mode:"lines", marker: { symbol: 'circle-closed-dot',size:3,line: { 'width':1 } } });
-        Plotly.addTraces(this.containerElem, plotlyData);
-    }
-}
-
-async function addDataSource(dataName,dataSource,dataType,attrs) {
-    const node = new Graphx.GraphxNode(dataName,dataSource,dataType);
+async function addNode(dataName,dataSource,dataType,attrs) {
+    const node = new Graphx.GraphxNode(dataName,dataSource,dataType,attrs);
     window.graphxTree.addNode(node);
-    
-    // TMP FIX
-    //dataSource = readFileAsArrayBuffer(dataSource);
-    //console.log('Adding dataSource',dataSource)
-    await node.renderGraphx(attrs);
 }
 
-async function renderAll(evt) {
-    const trackPromises = []
-    const meshPromises = []
-    const volumePromises = []
-    const scenePromises = []
-    
+async function loadAll(evt) {    
     if (evt.target.value == 'example.tck') {
         const dataSource = fetch('./data/example.tck').then( async (response) => await response.arrayBuffer() );
-        addDataSource('example.tck',dataSource,'track',{})
+        addNode('example.tck',dataSource,'track',{ visible:true, maxStreamlines:getMaxStreamlines() })
     } else {
+        let files = []
+        if (evt.dataTransfer) {
+            if (evt.dataTransfer.items) {
+                [...evt.dataTransfer.items].forEach((item, i) => {
+                    if (item.kind === "file") files.push(item.getAsFile());
+                });
+            } else {
+                [...evt.dataTransfer.files].forEach((file, i) => {
+                    files.push(item.getAsFile());
+                });
+            }
+        } else {
+            files = evt.target.files;
+        }
+            
         let hit = false;
-        for (let file of evt.target.files) {
+        for (let file of files) {
             const fname_lc = file.name.toLowerCase();
-            let attrs = {};
+            let attrs = { visible:true };
             let dataType = undefined;
             if (fname_lc.endsWith('.tck') || fname_lc.endsWith('.trk')) {
-                attrs = {maxStreamlines:getMaxStreamlines(),color:colorCycle.nextPlotColor()}
+                attrs.maxStreamlines = getMaxStreamlines();
+                attrs.color = colorCycle.nextPlotColor();
                 dataType= 'track'
                 hit = true;
             }
@@ -288,25 +203,16 @@ async function renderAll(evt) {
             if (fname_lc.endsWith('scene.json') || fname_lc.endsWith('scene.yaml')) {
                 dataType= 'scene'
             }
-            addDataSource(file.name,file,dataType,attrs)
+            addNode(file.name,file,dataType,attrs)
         }
         if (!hit) throw('No .tck/.trk/.vtk/.obj files among '+evt.target.files.length+' selected files.');
     }
     
-    //for (let trackPr of trackPromises) {
-    //    await renderTrack(...trackPr,maxStreamlines,window.graphxTree)
-    //}
-    //for (let meshPr of meshPromises) {
-    //    await renderMesh(...meshPr,window.graphxTree)
-    //}
-    //for (let volPr of volumePromises) {
-    //    await renderVolume(...volPr,window.graphxTree)
-    //}
-    //for (let scenePr of scenePromises) {
-    //    await renderScene(...scenePr,window.graphxTree)
-    //}
-    window.graphxTree.renderTree("graphxtree");
+    // this will show the tree-like GUI
+    window.graphxTree.renderGui("graphxtree");
+    // this will activate the webgl 3d graphics
+    window.graphxTree.visible = true;
 }
-window.renderAll = renderAll;
+window.loadAll = loadAll;
 </script>
 </body></html>

@@ -50,10 +50,11 @@ class DataSource {
 
 // parent class of all graphics nodes in the graphx tree
 class GraphxNode {
-    constructor(name,dataPromise,dataType) {
+    constructor(name,dataPromise,dataType,attrs) {
         this.name = name;
         this.dataSource = false
         if (dataPromise) this.dataSource = new DataSource(dataPromise,dataType);
+        this.attrs = attrs || {};
         this.children = [];
         this.domElem = false;
         this.parent = false;
@@ -76,15 +77,33 @@ class GraphxNode {
 
     expandBtn() {
         return el('input',{
-            type:'checkbox',
-            checked:'checked',
-            onclick:(evt)=>{
-                this.toggleGraphx(evt.target.checked)
+            type: 'checkbox',
+            checked: this.visible,
+            onclick: (evt)=>{
+                this.visible = evt.target.checked;
             }
         }).elem;
     }
     
-    renderTree(domElem) {
+    // getters/setters for attributes
+    get visible() {
+        return !!this.attrs.visible;
+    }
+    
+    set visible(makeVisible) {
+        this.attrs.visible = makeVisible;
+        // apply same visibility for all children
+        for (let ch of this.children) {
+            ch.attrs.visible = makeVisible;
+        }
+        return this.renderGraphx().then( ()=>{
+            const webglEngine = this.getRoot().webglEngine;
+            webglEngine.centerView();
+            this.renderGui(this.domElem);
+        } );
+    }
+    
+    renderGui(domElem) {
         // domElem is the document-object-model element that will contain the tree
         if (typeof(domElem) == 'string') domElem = document.getElementById(domElem);
         if (!domElem) throw('Cannot render GraphxNode without domElem');
@@ -114,7 +133,7 @@ class GraphxNode {
         for (let ch of this.children) {
             let childElem = el('div',{class:'gtItem',style:"padding-left:1ex;width:100%"}).elem;
             el(bodyElem).append(childElem);
-            ch.renderTree(childElem);
+            ch.renderGui(childElem);
         }
     }
     
@@ -143,39 +162,45 @@ console.log(src);
         
     }
     
-    async renderGraphx(attrs) {
-        const contents = await this.dataSource.load();
-        const name = this.name;
-        const type = this.dataSource.dataType;
-        let webglObject;
-        const webglEngine = this.getRoot().webglEngine;
-        if (type=='track') {
-            webglObject = await webglEngine.addTrack(contents,name,attrs);
-            webglEngine.centerView();
+    // render graphics of this node and its children
+    async renderGraphx() {
+        const makeVisible = this.visible;
+        if (this.webglObject) {
+            this.webglObject.visible = makeVisible;
+        } else {
+            if (makeVisible && this.dataSource) {
+                // Add webglObject to scene
+                const webglEngine = this.getRoot().webglEngine;
+                const contents = await this.dataSource.load();
+                const name = this.name;
+                const type = this.dataSource.dataType;
+                const attrs = this.attrs;
+                let webglObject;
+                if (type=='track') {
+                    webglObject = await webglEngine.addTrack(contents,name,attrs);
+                }
+                if (type=='mesh') {
+                    webglObject = await webglEngine.addMesh(contents,name,attrs);
+                }
+                if (type=='volume') {
+                    webglObject = await webglEngine.addVolume(contents,name,attrs);
+                }
+                this.webglObject = webglObject;
+            }
         }
-        if (type=='mesh') {
-            webglObject = await webglEngine.addMesh(contents,name,attrs);
-            webglEngine.centerView();
-        }
-        if (type=='volume') {
-            webglObject = await webglEngine.addVolume(contents,name,attrs);
-            webglEngine.centerView();            
-        }
+            
         /*
         if (type=='scene') {
             webglObject = await webglEngine.addScene(contents,name,attrs);
             webglEngine.centerView();
         }
         */
-        this.webglObject = webglObject;
-    }
-    
-    toggleGraphx(makeVisible) {
-        if (!this.webglObject) return;
-        if (makeVisible === undefined) makeVisible = !this.webglObject.visible;
-        this.webglObject.visible = makeVisible;
-        const webglEngine = this.getRoot().webglEngine;
-        webglEngine.render();
+
+        const promises = []
+        for (let ch of this.children) {
+            promises.push(ch.renderGraphx());
+        }
+        return Promise.all(promises);
     }
 }
 
