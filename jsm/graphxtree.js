@@ -50,8 +50,8 @@ class DataSource {
 
 // parent class of all graphics nodes in the graphx tree
 class GraphxNode {
-    constructor(name,dataPromise,dataType,attrs) {
-        this.name = name;
+    constructor(id,dataPromise,dataType,attrs) {
+        this.id = id;
         this.dataSource = false
         if (dataPromise) this.dataSource = new DataSource(dataPromise,dataType);
         this.attrs = attrs || {};
@@ -70,8 +70,8 @@ class GraphxNode {
         this.expand = doExpand;
     }
     
-    getRoot() {
-        if (this.parent) return this.parent.getRoot()
+    get root() {
+        if (this.parent) return this.parent.root
         else return this;
     }
 
@@ -86,21 +86,42 @@ class GraphxNode {
     }
     
     // getters/setters for attributes
+    get name() {
+        return this._name ? this._name : this.id;
+    }
+    
+    set name(name) {
+        this._name = name;
+    }
+
+    get descr() {
+        return this._descr ? this._descr : undefined;
+    }
+    set descr(descr) {
+        this._descr = descr;
+    }
+    
     get visible() {
         return !!this.attrs.visible;
     }
     
-    set visible(makeVisible) {
+    // recursively make this and childnodes visible
+    async setVisible(makeVisible,doRender) {
         this.attrs.visible = makeVisible;
         // apply same visibility for all children
         for (let ch of this.children) {
-            ch.attrs.visible = makeVisible;
+            ch.setVisible(makeVisible,false);
         }
-        return this.renderGraphx().then( ()=>{
-            const webglEngine = this.getRoot().webglEngine;
-            webglEngine.centerView();
+        if (doRender) {
             this.renderGui(this.domElem);
-        } );
+            await this.renderGraphx();
+            const graphxEngine = this.root.graphxEngine;
+            graphxEngine.centerView();
+        }
+    }
+        
+    set visible(makeVisible) {
+        this.setVisible(makeVisible,true);
     }
     
     renderGui(domElem) {
@@ -137,65 +158,65 @@ class GraphxNode {
         }
     }
     
-    async renderScene(dataPromise,name) {
-        const contents = dataPromise instanceof Promise ? await dataPromise : dataPromise;
+    async renderScene(contents) {
         const utf8decoder = new TextDecoder();
         
         const jsYaml = await import('./js-yaml.mjs');
-        const config = jsYaml.load( utf8decoder.decode(contents) );
-        if (!config) throw('Could not parse scene data, aborting.');
-        
-        const root = this.getRoot()
-        const name2node = {}
-        for (let id in root.nodeById) {
-            const node = root.nodeById[id]
-            if (node.name in name2node) console.log('Multiple nodes named '+node.name+' encountered, selecting the last added node.')
-            name2node[node.name] = node;
-        }
-console.log(config);                
-        if (config.scene && config.scene.dataSources) {
-            for (let src of config.scene.dataSources) {
-                // CONTINUE HERE, DO SOMETHING WITH THE NODE
-console.log(src);                
+        const spec = jsYaml.load( utf8decoder.decode(contents) );
+        if (!spec) throw('Could not parse scene data, aborting.');
+        const dataSources = spec.dataSources || spec.scene.dataSources;
+        const root = this.root;
+        for (let id in dataSources) {
+            const targetNode = root.nodeById[id]
+            if (targetNode) {
+                const attrs = dataSources[id]
+                // Unless otherwise specified, make datasource visible.
+                if (attrs.visible === undefined) attrs.visible=true;
+                const dataType = targetNode.dataSource.dataType;
+                const graphxEngine = this.root.graphxEngine;
+                if (dataType in graphxEngine.edit) {
+                    graphxEngine.edit[dataType](targetNode.graphxHandle,attrs)
+                }
+                targetNode.renderGraphx();
             }
         }
-        
+        root.graphxEngine.render();
     }
     
     // render graphics of this node and its children
     async renderGraphx() {
         const makeVisible = this.visible;
-        if (this.webglObject) {
-            this.webglObject.visible = makeVisible;
+        
+        if (this.graphxHandle) {
+            this.graphxHandle.visible = makeVisible;
         } else {
             if (makeVisible && this.dataSource) {
-                // Add webglObject to scene
-                const webglEngine = this.getRoot().webglEngine;
+                // Add graphxHandle to scene
+                const graphxEngine = this.root.graphxEngine;
                 const contents = await this.dataSource.load();
                 const name = this.name;
                 const type = this.dataSource.dataType;
                 const attrs = this.attrs;
-                let webglObject;
+                let graphxHandle;
                 if (type=='track') {
-                    webglObject = await webglEngine.addTrack(contents,name,attrs);
+                    graphxHandle = await graphxEngine.addTrack(contents,name,attrs);
                 }
                 if (type=='mesh') {
-                    webglObject = await webglEngine.addMesh(contents,name,attrs);
+                    graphxHandle = await graphxEngine.addMesh(contents,name,attrs);
                 }
                 if (type=='volume') {
-                    webglObject = await webglEngine.addVolume(contents,name,attrs);
+                    graphxHandle = await graphxEngine.addVolume(contents,name,attrs);
                 }
-                this.webglObject = webglObject;
+                if (type=='graph') {
+                    graphxHandle = await graphxEngine.addGraph(contents,name,attrs);
+                }
+                if (type=='scene') {
+                    this.renderScene(contents)
+                }
+                this.graphxHandle = graphxHandle;
             }
         }
             
-        /*
-        if (type=='scene') {
-            webglObject = await webglEngine.addScene(contents,name,attrs);
-            webglEngine.centerView();
-        }
-        */
-
         const promises = []
         for (let ch of this.children) {
             promises.push(ch.renderGraphx());
@@ -207,9 +228,9 @@ console.log(src);
 // generates/manipulates tree of all nodes that contribute to a scene
 class GraphxTree extends GraphxNode {
     // rootDiv is the element in the html document tree that layouts the tree.
-    constructor(webglEngine) {
+    constructor(graphxEngine) {
         super('__GraphxTree__');
-        this.webglEngine = webglEngine;
+        this.graphxEngine = graphxEngine;
         this.idCounter = 0;
         this.nodeById = {};
     }
@@ -219,20 +240,39 @@ class GraphxTree extends GraphxNode {
         return this.nodeById[id];
     }
 
+    /*
     // get next node-ID as a combination of number and name
     nextNodeId(nodeName) {
         let nodeId = ''+(this.idCounter)+'_'+nodeName;
         this.idCounter += 1;
         return nodeId;
     }
+    */
+        
+    getTypeParent(dataType) {
+        const plural = {
+            'scene':'Scenes',
+            'track':'Tracks',
+            'volume':'Volumes',
+            'mesh':'Meshes'
+        };
+        const id = plural[dataType] || '['+dataType+' objects]';
+        let node = this.nodeById[id];
+        if (!node) {
+            const id = plural[dataType] || '['+dataType+' objects]';
+            node = new GraphxNode(id);
+            this.addNode(node,this);
+        }
+        return node;
+    }
     
     // obj must be instance of GraphNode
     addNode(node,parent) {
         if (!node instanceof GraphxNode) throw('Nodes in objectTree must be instance of GraphxNode');
-        if (!parent) parent = this;
-        const id = this.nextNodeId(node.name)
-        node.id = id;
-        this.nodeById[id] = node;
+        const dataType = (node.dataSource.dataType)
+        if (!parent) parent = this.getTypeParent(dataType);
+        if (this.nodeById[node.id]) throw('Node with name '+id+' already exists');
+        this.nodeById[node.id] = node;
         parent.addChild(node);
     }
 }

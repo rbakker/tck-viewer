@@ -1,10 +1,11 @@
-const [module,TrackballControls,Line2,LineMaterial,LineGeometry] = await Promise.all([
+const [module,TrackballControls,Line2,LineMaterial,LineGeometry,BufferGeometryUtils] = await Promise.all([
    import('three'),
    //import('three/addons/controls/OrbitControls.js'),
    import('three/addons/controls/TrackballControls_RB.js'),
    import('three/addons/lines/Line2.js'),
    import('three/addons/lines/LineMaterial.js'),
-   import('three/addons/lines/LineGeometry.js')
+   import('three/addons/lines/LineGeometry.js'),
+   import('three/addons/utils/BufferGeometryUtils.js')
 ])
 const threeModule = module;
 const threeAddOns = { 
@@ -12,15 +13,42 @@ const threeAddOns = {
     'TrackballControls': TrackballControls.TrackballControls,
     'Line2': Line2.Line2,
     'LineMaterial': LineMaterial.LineMaterial,
-    'LineGeometry': LineGeometry.LineGeometry
+    'LineGeometry': LineGeometry.LineGeometry,
+    'BufferGeometryUtils': BufferGeometryUtils.BufferGeometryUtils
 }
 
+class graphxHandle {
+    constructor(geom) {
+        this.geom = geom
+    }
+    
+    set visible(makeVisible) {
+        this.geom.visible = makeVisible;
+    }
+}
 
-function ThreeEngine(containerElem) {
+class TrackHandle extends graphxHandle {
+    constructor(geom,color) {
+        super(geom);
+        this._color = color
+    }
+    
+    set color(color) {
+        for (let ch of this.geom.children) {
+            if (ch.material) {
+                ch.material.color = new threeModule.Color(color)
+                ch.material.needsUpdate = true;
+            }
+        }
+        this._color = color;
+    }
+}
+
+function GraphxEngine(containerElem) {
     this.init(containerElem);
 }
 
-ThreeEngine.prototype = {
+GraphxEngine.prototype = {
     init: function(containerElem) {
         // Inspired by https://threejs.org/manual/#en/rendering-on-demand
         this.renderer = new threeModule.WebGLRenderer({ antialias: true });
@@ -42,9 +70,10 @@ ThreeEngine.prototype = {
         this.camera.lookAt( 0, 0, 0 );
 
         this.scene = new threeModule.Scene();
-        this.scene.background = new threeModule.Color( 0xffffff );
-        
-        //this.scene.fog = new threeModule.FogExp2( 0xcccccc, 0.004 );
+        this.scene.background = new threeModule.Color( 0x000000 );
+		this.scene.add( new threeModule.AmbientLight( 0xffffff ) );
+        this.headLight = new threeModule.DirectionalLight( 0xffffff, 1 );
+        this.scene.add( this.headLight );
         
         this.render();
 
@@ -55,19 +84,18 @@ ThreeEngine.prototype = {
         if (this.renderer) this.renderer.clear();
     },
     render: async function() {
+        this.headLight.position.copy( this.camera.position );
         await this.renderer.render( this.scene, this.camera ) 
     },
     centerView: async function() {
-await this.render();
         // Inspiration: https://stackoverflow.com/questions/14614252/how-to-fit-camera-to-object
         // get the tracks into view of the camera
+        this.render();
         let bBox = new threeModule.Box3().setFromObject(this.scene);
         const sphere = new threeModule.Sphere();
-this.render();
         bBox.getBoundingSphere(sphere);
-console.log(bBox,this.scene,sphere);
         const dist = (sphere.radius-sphere.center.x) / (2 * Math.tan(this.camera.fov * Math.PI / 360));
-        this.camera.position.set(dist * 2.0, sphere.center.y, sphere.center.z); // fudge factor so you can see the boundaries
+        this.camera.position.set(dist * 1.5, sphere.center.y, sphere.center.z); // fudge factor so you can see the boundaries
         this.camera.lookAt(sphere.center);
         this.controls.target = sphere.center;
         this.controls.minDistance = dist/10; 
@@ -116,7 +144,7 @@ console.log(bBox,this.scene,sphere);
             group.add( line );
         }
         this.scene.add(group);
-        return group;
+        return new TrackHandle(group,hexColor);
     },
     addMesh: async function(contents,meshName,attrs) {
         let Loader;
@@ -132,26 +160,46 @@ console.log(bBox,this.scene,sphere);
         let geometry = (new Loader()).parse(contents);
         if (geometry.type == 'Group') geometry = geometry.children[0];
         if (geometry.geometry) geometry = geometry.geometry;
-        geometry.computeVertexNormals();
-
-        //const hemiLight = new threeModule.HemisphereLight( 0xffffff, 0x000000, 3 );
-        //this.scene.add( hemiLight );
-
+        //geometry = BufferGeometryUtils.mergeVertices(geometry);
+        //geometry.computeBoundingBox();
+        //geometry.computeVertexNormals();
+        
         const material = new threeModule.ShaderMaterial( {
                     uniforms: { 
-              'diffuseColor': { value: new threeModule.Color(0x777777) },
+              'diffuseColor': { value: new threeModule.Color(0xFFFFFF) },
               'transparency': { value: 0.3 },
               'edgeEffect': { value: 1 },
             },
             vertexShader: document.getElementById( 'glass_vertexShader' ).textContent,
             fragmentShader: document.getElementById( 'glass_fragmentShader' ).textContent,
-            side: threeModule.DoubleSide,
-            alphaToCoverage: true // only works when WebGLRenderer's "antialias" is set to "true"
+            side: threeModule.BackSide,
+            alphaToCoverage: false, // only works when WebGLRenderer's "antialias" is set to "true",
+            depthTest: true,
+            transparent: true
         } );
 
         const mesh = new threeModule.Mesh( geometry, material );
         this.scene.add( mesh );
-        return mesh;
+        return new graphxHandle(mesh);
+    },
+    edit: {
+        mesh: async function(gxHandle,attrs) {
+            if ('color' in attrs) {
+                const material = new threeModule.MeshPhongMaterial({
+                    color: attrs.color,    // red (can also use a CSS color string here)
+                    flatShading: false,
+                    side: threeModule.DoubleSide,
+                    shininess: 50,
+                    specular: 0x888888
+                });
+                gxHandle.geom.material = material
+            }
+        },
+        track: async function(gxHandle,attrs) {
+            if ('color' in attrs) {
+                gxHandle.color = attrs['color']
+            }
+        }
     },
     addVolume: async function(contents,volName,attrs) {
         const group = new threeModule.Group();
@@ -221,7 +269,7 @@ console.log(bBox,this.scene,sphere);
         */
         
         this.scene.add( group );
-        return group;
+        return new graphxHandle(group);
 
         /*
 				
@@ -286,7 +334,26 @@ console.log(bBox,this.scene,sphere);
 
 					} );
      */
+    },
+    addGraph: async function(contents,graphName,attrs) {
+        const parser = await import('./graphparser.js');
+        const graph = parser.parseContents(contents);
+        const group = new threeModule.Group();
+        for (const node of graph.nodes) {
+            const xyz = node[1];
+            const geometry = new threeModule.SphereGeometry( 0.15, 16, 8 ); 
+            geometry.translate(...xyz);
+            const material = new threeModule.MeshPhongMaterial( { color: 0xff0000, shininess: 200 } ); 
+            const sphere = new threeModule.Mesh( geometry, material );
+            group.add( sphere );
+        }
+        this.scene.add(group)
+        return new graphxHandle(group);
+    },
+    // untested
+    removeFromScene: async function(gxHandle) {
+        this.scene.remove(gxHandle.geom)
     }
 }
 
-export { ThreeEngine }
+export { GraphxEngine }
