@@ -16,9 +16,9 @@
 body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;
   display:flex;height:100vh;overflow:hidden;font-size:11px;}
 
-/* ── LEFT PANEL ── */
-#left{width:33.333%;display:flex;flex-direction:column;border-right:1px solid var(--border);
-  background:var(--panel);}
+/* ── LEFT PANEL (1/4) ── */
+#left{width:25%;display:flex;flex-direction:column;border-right:1px solid var(--border);
+  background:var(--panel);flex-shrink:0;}
 .slice-row{flex:1;display:flex;flex-direction:column;position:relative;
   border-bottom:1px solid var(--border);}
 .slice-row:last-child{border-bottom:none;}
@@ -31,9 +31,20 @@ body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospa
   font-size:10px;pointer-events:none;}
 .slice-canvas{width:100%;height:100%;display:block;cursor:crosshair;}
 
-/* ── RIGHT PANEL ── */
-#right{flex:1;position:relative;}
+/* ── MIDDLE PANEL (1/2) ── */
+#middle{flex:1;position:relative;}
 #three-canvas{width:100%;height:100%;display:block;}
+
+/* ── RIGHT PANEL (1/4) ── */
+#right{width:25%;display:flex;flex-direction:column;border-left:1px solid var(--border);
+  background:var(--panel);flex-shrink:0;}
+#right .slice-label{font-size:9px;}
+#right .slice-coord{font-size:9px;}
+#slab-ctl{position:absolute;bottom:6px;left:6px;right:6px;pointer-events:all;
+  display:flex;align-items:center;gap:6px;z-index:3;}
+#slab-ctl label{color:var(--dim);letter-spacing:0.1em;font-size:9px;white-space:nowrap;}
+#slab-ctl input{flex:1;accent-color:var(--accent2);}
+#slab-val{color:var(--text);font-size:9px;min-width:34px;}
 
 /* ── HUD overlays ── */
 #load-overlay{position:absolute;inset:0;display:flex;align-items:center;
@@ -66,27 +77,27 @@ input[type=file]{display:none;}
 </head>
 <body>
 
-<!-- LEFT: slice viewers -->
+<!-- LEFT: slice viewers (cursor A → probe) -->
 <div id="left">
   <div class="slice-row" id="row-sag">
-    <div class="slice-label sag">SAG</div>
+    <div class="slice-label sag">SAG·A</div>
     <div class="slice-coord" id="coord-sag">—</div>
     <canvas class="slice-canvas" id="cvs-sag"></canvas>
   </div>
   <div class="slice-row" id="row-cor">
-    <div class="slice-label cor">COR</div>
+    <div class="slice-label cor">COR·A</div>
     <div class="slice-coord" id="coord-cor">—</div>
     <canvas class="slice-canvas" id="cvs-cor"></canvas>
   </div>
   <div class="slice-row" id="row-axi">
-    <div class="slice-label axi">AXI</div>
+    <div class="slice-label axi">AXI·A</div>
     <div class="slice-coord" id="coord-axi">—</div>
     <canvas class="slice-canvas" id="cvs-axi"></canvas>
   </div>
 </div>
 
-<!-- RIGHT: 3D view -->
-<div id="right">
+<!-- MIDDLE: 3D view -->
+<div id="middle">
   <canvas id="three-canvas"></canvas>
 
   <!-- load overlay -->
@@ -109,7 +120,7 @@ input[type=file]{display:none;}
     <div id="progress"></div>
   </div>
 
-  <div id="right-hud" style="display:none;">
+  <div id="middle-hud" style="display:none;">
     <div id="info">
       <div><span>LEFT DRAG</span> rotate &nbsp; <span>RIGHT DRAG</span> pan &nbsp; <span>SCROLL</span> zoom</div>
       <div><span>CLICK SLICES</span> move probe &nbsp; <span>SCROLL SLICES</span> change slice</div>
@@ -120,11 +131,35 @@ input[type=file]{display:none;}
     </div>
     <div id="radius-ctl">
       <label>RADIUS</label>
-      <input type="range" id="radius-slider" min="1" max="30" value="5" step="0.5">
-      <span id="radius-val">5.0 mm</span>
+      <input type="range" id="radius-slider" min="1" max="30" value="2" step="0.5">
+      <span id="radius-val">2.0 mm</span>
     </div>
     <div id="coord-hud">
       <div>X <span id="hud-x">—</span> &nbsp; Y <span id="hud-y">—</span> &nbsp; Z <span id="hud-z">—</span> mm</div>
+    </div>
+  </div>
+</div>
+
+<!-- RIGHT: slice viewers (cursor B → slab overlay) -->
+<div id="right">
+  <div class="slice-row" id="row-sag-b" style="position:relative;">
+    <div class="slice-label sag">SAG·B</div>
+    <div class="slice-coord" id="coord-sag-b">—</div>
+    <canvas class="slice-canvas" id="cvs-sag-b"></canvas>
+  </div>
+  <div class="slice-row" id="row-cor-b" style="position:relative;">
+    <div class="slice-label cor">COR·B</div>
+    <div class="slice-coord" id="coord-cor-b">—</div>
+    <canvas class="slice-canvas" id="cvs-cor-b"></canvas>
+  </div>
+  <div class="slice-row" id="row-axi-b" style="position:relative;">
+    <div class="slice-label axi">AXI·B</div>
+    <div class="slice-coord" id="coord-axi-b">—</div>
+    <canvas class="slice-canvas" id="cvs-axi-b"></canvas>
+    <div id="slab-ctl">
+      <label>SLAB</label>
+      <input type="range" id="slab-slider" min="0.5" max="20" value="2" step="0.5">
+      <span id="slab-val">2.0×</span>
     </div>
   </div>
 </div>
@@ -136,8 +171,9 @@ input[type=file]{display:none;}
 // 0.  SHARED STATE
 // ═══════════════════════════════════════════════════════════
 const state = {
-  cursor: [0,0,0],   // RAS mm
-  nii: null,         // parsed NIfTI
+  cursor:  [0,0,0],   // RAS mm — cursor A (probe)
+  cursorB: [0,0,0],   // RAS mm — cursor B (slab viewer)
+  nii: null,
   tckLoaded: false,
   niiLoaded: false,
 };
@@ -146,6 +182,11 @@ function setCursor(ras, source) {
   updateSlices(source);
   updateProbe();
   updateCoordHud();
+}
+function setCursorB(ras, source) {
+  state.cursorB = ras;
+  updateSlicesB(source);
+  updateCoordLabelsB();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -202,9 +243,9 @@ async function parseNifti(buf) {
   } else {
     // fallback: simple voxel scaling
     affine = [
-      [pixdim[1],0,0,-pixdim[1]*nx/2],
-      [0,pixdim[2],0,-pixdim[2]*ny/2],
-      [0,0,pixdim[3],-pixdim[3]*nz/2],
+      [pixdim[1],0,0,-34.6109],
+      [0,pixdim[2],0,-42.1216],
+      [0,0,pixdim[3],-28.8115],
       [0,0,0,1]
     ];
   }
@@ -293,11 +334,11 @@ const planes = {
         const i=(z*W+y)*4; px[i]=v;px[i+1]=v;px[i+2]=v;px[i+3]=255;
       }
       return {imageData:new ImageData(px,W,H),
-        cx:vox[1]/nii.ny, cy:1-vox[2]/nii.nz,
+        cx:(vox[1]+0.5)/nii.ny, cy:1-(vox[2]+0.5)/nii.nz,
         physW:nii.ny*nii.pixdim[2], physH:nii.nz*nii.pixdim[3]};
     },
     clickToRas(nii,fx,fy,vox){
-      const y=fx*nii.ny, z=(1-fy)*nii.nz;
+      const y=fx*nii.ny-0.5, z=(1-fy)*nii.nz-0.5;
       return voxToRas(nii,vox[0],y,z);
     },
     clickToRasLB(nii,ex,ey,vox){
@@ -320,11 +361,11 @@ const planes = {
         const i=(z*W+x)*4; px[i]=v;px[i+1]=v;px[i+2]=v;px[i+3]=255;
       }
       return {imageData:new ImageData(px,W,H),
-        cx:vox[0]/nii.nx, cy:1-vox[2]/nii.nz,
+        cx:(vox[0]+0.5)/nii.nx, cy:1-(vox[2]+0.5)/nii.nz,
         physW:nii.nx*nii.pixdim[1], physH:nii.nz*nii.pixdim[3]};
     },
     clickToRas(nii,fx,fy,vox){
-      const x=fx*nii.nx, z=(1-fy)*nii.nz;
+      const x=fx*nii.nx-0.5, z=(1-fy)*nii.nz-0.5;
       return voxToRas(nii,x,vox[1],z);
     },
     clickToRasLB(nii,ex,ey,vox){
@@ -347,11 +388,11 @@ const planes = {
         const i=(y*W+x)*4; px[i]=v;px[i+1]=v;px[i+2]=v;px[i+3]=255;
       }
       return {imageData:new ImageData(px,W,H),
-        cx:vox[0]/nii.nx, cy:1-vox[1]/nii.ny,
+        cx:(vox[0]+0.5)/nii.nx, cy:1-(vox[1]+0.5)/nii.ny,
         physW:nii.nx*nii.pixdim[1], physH:nii.ny*nii.pixdim[2]};
     },
     clickToRas(nii,fx,fy,vox){
-      const x=fx*nii.nx, y=(1-fy)*nii.ny;
+      const x=fx*nii.nx-0.5, y=(1-fy)*nii.ny-0.5;
       return voxToRas(nii,x,y,vox[2]);
     },
     clickToRasLB(nii,ex,ey,vox){
@@ -361,6 +402,26 @@ const planes = {
       if(fx<0||fx>1||fy<0||fy>1) return null;
       return this.clickToRas(nii,fx,fy,vox);
     }
+  }
+};
+
+// ── Right panel planes (cursor B) ────────────────────────
+// Same structure as planes but for canvases cvs-*-b
+const planesB = {
+  sag: { canvas:null, ctx:null, label:'SAG', color:'#3af8cc', _lb:null,
+    getSlice: planes.sag.getSlice,
+    clickToRas: planes.sag.clickToRas,
+    clickToRasLB(nii,ex,ey,vox){ if(!this._lb) return null; const {dx,dy,dw,dh}=this._lb; const fx=(ex-dx)/dw,fy=(ey-dy)/dh; if(fx<0||fx>1||fy<0||fy>1) return null; return this.clickToRas(nii,fx,fy,vox); }
+  },
+  cor: { canvas:null, ctx:null, label:'COR', color:'#f8a03a', _lb:null,
+    getSlice: planes.cor.getSlice,
+    clickToRas: planes.cor.clickToRas,
+    clickToRasLB(nii,ex,ey,vox){ if(!this._lb) return null; const {dx,dy,dw,dh}=this._lb; const fx=(ex-dx)/dw,fy=(ey-dy)/dh; if(fx<0||fx>1||fy<0||fy>1) return null; return this.clickToRas(nii,fx,fy,vox); }
+  },
+  axi: { canvas:null, ctx:null, label:'AXI', color:'#a03af8', _lb:null,
+    getSlice: planes.axi.getSlice,
+    clickToRas: planes.axi.clickToRas,
+    clickToRasLB(nii,ex,ey,vox){ if(!this._lb) return null; const {dx,dy,dw,dh}=this._lb; const fx=(ex-dx)/dw,fy=(ey-dy)/dh; if(fx<0||fx>1||fy<0||fy>1) return null; return this.clickToRas(nii,fx,fy,vox); }
   }
 };
 
@@ -405,6 +466,139 @@ function drawSlice(planeKey, skipSource) {
 function updateSlices(skipSource) {
   for (const k of ['sag','cor','axi']) drawSlice(k, skipSource);
   updateCoordLabels();
+}
+
+// ── Right panel draw (anatomy + slab streamlines overlay) ─
+function drawSliceB(planeKey) {
+  if (!state.nii) return;
+  const pl = planesB[planeKey];
+  const cvs = pl.canvas;
+  const ctx = pl.ctx;
+  const nii = state.nii;
+  const vox = rasToVox(nii, ...state.cursorB);
+  const W=cvs.width, H=cvs.height;
+
+  const {imageData, cx, cy, physW, physH} = pl.getSlice(nii, vox);
+  const scale = Math.min(W/physW, H/physH);
+  const dw=physW*scale, dh=physH*scale;
+  const dx=(W-dw)/2, dy=(H-dh)/2;
+  pl._lb = {dx,dy,dw,dh};
+
+  const offscreen = new OffscreenCanvas(imageData.width, imageData.height);
+  offscreen.getContext('2d').putImageData(imageData,0,0);
+  ctx.fillStyle='#000';
+  ctx.fillRect(0,0,W,H);
+  ctx.drawImage(offscreen, dx,dy,dw,dh);
+
+  // slab streamline overlay
+  if (selTracts && selTracts.length) {
+    drawSlabOverlay(ctx, planeKey, pl._lb, vox, nii);
+  }
+
+  // crosshair
+  const px=dx+cx*dw, py=dy+cy*dh;
+  ctx.save();
+  ctx.globalAlpha=0.7;
+  ctx.strokeStyle=pl.color;
+  ctx.lineWidth=1;
+  ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.moveTo(px,dy); ctx.lineTo(px,dy+dh); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(dx,py); ctx.lineTo(dx+dw,py); ctx.stroke();
+  ctx.restore();
+}
+
+// slabMultiplier: user-set multiplier × voxel thickness
+let slabMultiplier = 2.0;
+
+function getSlabThickness(planeKey, nii) {
+  // half-thickness in VOXELS (depth comparison is now in voxel space)
+  return slabMultiplier / 2;
+}
+
+function drawSlabOverlay(ctx, planeKey, lb, vox, nii) {
+  // Project selected streamlines onto this slice plane.
+  // All coordinates go through rasToVox so the affine is respected.
+  const {dx,dy,dw,dh} = lb;
+  const halfThick = getSlabThickness(planeKey, nii);
+
+  // Out-of-plane voxel index for cursor B
+  // sag=vox[0], cor=vox[1], axi=vox[2]
+  const planeVoxCoord = planeKey==='sag' ? vox[0]
+                      : planeKey==='cor' ? vox[1]
+                      : vox[2];
+
+  // Convert a RAS point to canvas pixel via voxel space
+  // Matches exactly what getSlice draws: col/row fractions of voxel grid
+  function rasToPixel(rx, ry, rz) {
+    const [vx,vy,vz] = rasToVox(nii, rx, ry, rz);
+    if (planeKey==='sag') {
+      return [dx + ((vy+0.5)/nii.ny)*dw,  dy + (1-(vz+0.5)/nii.nz)*dh];
+    } else if (planeKey==='cor') {
+      return [dx + ((vx+0.5)/nii.nx)*dw,  dy + (1-(vz+0.5)/nii.nz)*dh];
+    } else {
+      return [dx + ((vx+0.5)/nii.nx)*dw,  dy + (1-(vy+0.5)/nii.ny)*dh];
+    }
+  }
+
+  ctx.save();
+  ctx.lineWidth = 1.2;
+
+  for (const t of selTracts) {
+    const n = t.length/3;
+    if (n < 2) continue;
+    for (let i=0; i<n-1; i++) {
+      const x0=t[3*i],   y0=t[3*i+1],   z0=t[3*i+2];
+      const x1=t[3*i+3], y1=t[3*i+4],   z1=t[3*i+5];
+
+      // midpoint in voxel space — depth = out-of-plane voxel distance
+      const [mvx,mvy,mvz] = rasToVox(nii, (x0+x1)/2, (y0+y1)/2, (z0+z1)/2);
+      const midVox = planeKey==='sag' ? mvx : planeKey==='cor' ? mvy : mvz;
+      const depth = midVox - planeVoxCoord;   // in voxels
+      const absDep = Math.abs(depth);
+
+      // skip segments too far from slab (show ±3× half-thickness as fade zone)
+      if (absDep > halfThick * 4) continue;
+
+      // brightness: 1.0 in slab, fades to 0.2 beyond 3× halfThick
+      let brightness;
+      if (absDep <= halfThick) {
+        brightness = 1.0;
+      } else {
+        brightness = Math.max(0.15, 1.0 - (absDep-halfThick)/(halfThick*3));
+      }
+
+      // orientation color
+      const ddx=Math.abs(x1-x0), ddy=Math.abs(y1-y0), ddz=Math.abs(z1-z0);
+      const dl=Math.sqrt(ddx*ddx+ddy*ddy+ddz*ddz)||1;
+      const r=Math.round((ddx/dl)*255*brightness);
+      const g=Math.round((ddy/dl)*255*brightness);
+      const b=Math.round((ddz/dl)*255*brightness);
+
+      const [px0,py0] = rasToPixel(x0,y0,z0);
+      const [px1,py1] = rasToPixel(x1,y1,z1);
+
+      ctx.strokeStyle = `rgb(${r},${g},${b})`;
+      ctx.beginPath();
+      ctx.moveTo(px0,py0);
+      ctx.lineTo(px1,py1);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function updateSlicesB(skipSource) {
+  for (const k of ['sag','cor','axi']) drawSliceB(k);
+  updateCoordLabelsB();
+}
+
+function updateCoordLabelsB() {
+  if (!state.nii) return;
+  const vox = rasToVox(state.nii, ...state.cursorB);
+  const [vx,vy,vz] = vox.map(Math.round);
+  document.getElementById('coord-sag-b').textContent = `x=${vx}`;
+  document.getElementById('coord-cor-b').textContent = `y=${vy}`;
+  document.getElementById('coord-axi-b').textContent = `z=${vz}`;
 }
 
 function updateCoordLabels() {
@@ -770,7 +964,8 @@ const controls = new TrackballControls(camera, threeCanvas);
 // ── 3D scene objects ──────────────────────────────────────
 let bgMesh=null, selMesh=null, probeSphere=null;
 let gridIdx=null, tractForPoint=null, allPts=null, allTracts=null;
-let radius=5.0;
+let radius=2.0;
+let selTracts=[];
 
 function makeEndpointCloud(tracts){
   const pos=new Float32Array(tracts.length*6);
@@ -778,7 +973,7 @@ function makeEndpointCloud(tracts){
   for(const t of tracts){const n=t.length/3;pos[vi++]=t[0];pos[vi++]=t[1];pos[vi++]=t[2];pos[vi++]=t[3*(n-1)];pos[vi++]=t[3*(n-1)+1];pos[vi++]=t[3*(n-1)+2];}
   const geo=new THREE.BufferGeometry();
   geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
-  return new THREE.Points(geo,new THREE.PointsMaterial({size:0.05,color:0x556677,sizeAttenuation:true}));
+  return new THREE.Points(geo,new THREE.PointsMaterial({size:0.2,color:0x556677,sizeAttenuation:true}));
 }
 function makeLineSegments(tracts){
   let totalVerts=0;
@@ -821,12 +1016,14 @@ function updateProbe(){
   const hitSet=new Set();
   for(const pi of hitPts) hitSet.add(tractForPoint[pi]);
   const ids=Array.from(hitSet);
+  selTracts=ids.map(i=>allTracts[i]);
   document.getElementById('stat-sel').textContent=ids.length?`${ids.length.toLocaleString()} selected`:'';
   if(ids.length){
-    selMesh=makeLineSegments(ids.map(i=>allTracts[i]));
+    selMesh=makeLineSegments(selTracts);
     scene.add(selMesh);
   }
   renderer.render(scene,camera);
+  updateSlicesB();
 }
 
 function updateCoordHud(){
@@ -838,7 +1035,8 @@ function updateCoordHud(){
 
 // ── resize Three.js canvas ────────────────────────────────
 function resizeThreeCanvas(){
-  const w=threeCanvas.clientWidth, h=threeCanvas.clientHeight;
+  const mc=document.getElementById('middle');
+const w=mc.clientWidth, h=mc.clientHeight;
   renderer.setSize(w,h,false);
   camera.aspect=w/h;
   camera.updateProjectionMatrix();
@@ -864,6 +1062,7 @@ async function loadNii(file){
   // set initial cursor to centre of volume
   const n=state.nii;
   state.cursor=voxToRas(n, n.nx/2, n.ny/2, n.nz/2);
+  state.cursorB=[...state.cursor];
   state.niiLoaded=true;
   setProgress('');
   checkShowHud();
@@ -920,7 +1119,7 @@ function checkShowHud(){
     const ov=document.getElementById('load-overlay');
     if(ov) ov.remove();
   }
-  document.getElementById('right-hud').style.display='block';
+  document.getElementById('middle-hud').style.display='block';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -967,38 +1166,96 @@ document.getElementById('radius-slider').addEventListener('input',e=>{
 // ═══════════════════════════════════════════════════════════
 // 9.  INIT & RESIZE
 // ═══════════════════════════════════════════════════════════
-// wire up slice canvases
+
+function resizeSliceCanvasesB() {
+  for (const k of ['sag','cor','axi']) {
+    const cvs = planesB[k].canvas;
+    const row = cvs.closest('.slice-row');
+    cvs.width  = row.clientWidth;
+    cvs.height = row.clientHeight;
+  }
+  updateSlicesB();
+}
+
+function initSliceInteractionB(planeKey) {
+  const pl = planesB[planeKey];
+  const cvs = pl.canvas;
+  let isDragging = false;
+  function clickHandler(e) {
+    if (!state.nii) return;
+    const rect = cvs.getBoundingClientRect();
+    const ex = (e.clientX-rect.left)*(cvs.width/rect.width);
+    const ey = (e.clientY-rect.top)*(cvs.height/rect.height);
+    const vox = rasToVox(state.nii, ...state.cursorB);
+    const newRas = pl.clickToRasLB(state.nii, ex, ey, vox);
+    if (newRas) setCursorB(newRas, planeKey);
+  }
+  cvs.addEventListener('mousedown', e=>{ isDragging=true; clickHandler(e); });
+  cvs.addEventListener('mousemove', e=>{ if(isDragging) clickHandler(e); });
+  document.addEventListener('mouseup', ()=>isDragging=false);
+  cvs.addEventListener('wheel', e=>{
+    e.preventDefault();
+    if (!state.nii) return;
+    const nii=state.nii;
+    const vox=rasToVox(nii,...state.cursorB);
+    const dir=e.deltaY>0?1:-1;
+    let newVox=[...vox];
+    if(planeKey==='sag') newVox[0]=Math.max(0,Math.min(nii.nx-1,vox[0]+dir));
+    if(planeKey==='cor') newVox[1]=Math.max(0,Math.min(nii.ny-1,vox[1]+dir));
+    if(planeKey==='axi') newVox[2]=Math.max(0,Math.min(nii.nz-1,vox[2]+dir));
+    setCursorB(voxToRas(nii,...newVox), planeKey);
+  },{passive:false});
+}
+
+// wire up LEFT panel (cursor A)
 planes.sag.canvas=document.getElementById('cvs-sag'); planes.sag.ctx=planes.sag.canvas.getContext('2d');
 planes.cor.canvas=document.getElementById('cvs-cor'); planes.cor.ctx=planes.cor.canvas.getContext('2d');
 planes.axi.canvas=document.getElementById('cvs-axi'); planes.axi.ctx=planes.axi.canvas.getContext('2d');
 for(const k of ['sag','cor','axi']) initSliceInteraction(k);
 
-const ro=new ResizeObserver(()=>{resizeSliceCanvases();resizeThreeCanvas();});
+// wire up RIGHT panel (cursor B)
+planesB.sag.canvas=document.getElementById('cvs-sag-b'); planesB.sag.ctx=planesB.sag.canvas.getContext('2d');
+planesB.cor.canvas=document.getElementById('cvs-cor-b'); planesB.cor.ctx=planesB.cor.canvas.getContext('2d');
+planesB.axi.canvas=document.getElementById('cvs-axi-b'); planesB.axi.ctx=planesB.axi.canvas.getContext('2d');
+for(const k of ['sag','cor','axi']) initSliceInteractionB(k);
+
+// slab slider
+document.getElementById('slab-slider').addEventListener('input', e=>{
+  slabMultiplier = parseFloat(e.target.value);
+  document.getElementById('slab-val').textContent = slabMultiplier.toFixed(1)+'x';
+  updateSlicesB();
+});
+
+const ro=new ResizeObserver(()=>{resizeSliceCanvases();resizeSliceCanvasesB();resizeThreeCanvas();});
 ro.observe(document.getElementById('left'));
 ro.observe(document.getElementById('right'));
+ro.observe(document.getElementById('middle'));
 resizeSliceCanvases();
+resizeSliceCanvasesB();
 resizeThreeCanvas();
 
 // ═══════════════════════════════════════════════════════════
 // 10.  DEMO
 // ═══════════════════════════════════════════════════════════
-async function loadDemoNii() {
-  const res = await fetch('M01_T2w.nii.gz');
-  const blob = await res.blob();
-  const file = new File([blob], 'demo.nii.gz', { type: blob.type });
-  loadNii(file);
-}
+if (window.location.search.includes('demo') || 1) {
+	async function loadDemoNii() {
+	  const res = await fetch('M01_T2w.nii.gz');
+	  const blob = await res.blob();
+	  const file = new File([blob], 'demo.nii.gz', { type: blob.type });
+	  loadNii(file);
+	}
 
-async function loadDemoTck() {
-  const res = await fetch('sub-M01_ses-1_wholebrain_10k_1.tck');
-  const buffer = await res.arrayBuffer();
-  loadTck(buffer);
-}
+	async function loadDemoTck() {
+	  const res = await fetch('sub-M01_ses-1_wholebrain_10k_1.tck');
+	  const buffer = await res.arrayBuffer();
+	  loadTck(buffer);
+	}
 
-window.addEventListener('DOMContentLoaded', () => {
-  loadDemoNii();
-  loadDemoTck();
-});
+	window.addEventListener('DOMContentLoaded', () => {
+	  loadDemoNii();
+	  loadDemoTck();
+	});
+}
 </script>
 </body>
 </html>
